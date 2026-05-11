@@ -94,7 +94,7 @@ Both examples inherit these defaults from `run_mlip_phonons.sh`:
 - UED temperature sweep: `0:50:1500 K`
 - UED temperature Bragg targets: `G = (1,0,0)` and `G = (1,1,0)`; Si (primitive cell) overrides to `G = (1,1,1)` and `G = (1,1,0)`
 - UED phonon cutoff: `0.2 meV`
-- UED reciprocal tiling: `GMAX=3`
+- UED reciprocal tiling: radial `|Q| <= GMAX * |G_primitive|min`, with `GMAX=3`
 - tiled UED CSV output: disabled by the MoS2 and Si example wrappers to reduce runtime and memory
 - electron scattering model: `peng`
 - eigenvector gauge: `phonopy_to_phx`

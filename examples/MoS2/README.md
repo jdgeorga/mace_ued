@@ -7,6 +7,7 @@ bash examples/MoS2/run_mos2.sh
 ```
 
 Outputs are written under `examples/MoS2/run/` unless `OUTPUT_PREFIX` is set.
+The default `UED_GMAX=3` is interpreted as a radial reciprocal-space cutoff.
 
 The UED analysis step also writes `ued_intensity/temperature_dependent_bragg.csv`,
 `ued_intensity/dw_factor_vs_temperature.png`, and

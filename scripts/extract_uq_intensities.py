@@ -37,9 +37,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--phwmin-mev", type=float, default=0.2, help="Low-energy phonon cutoff in meV.")
-    parser.add_argument("--gmax", type=int, default=3, help="Hex-shell max for in-plane reciprocal tiling.")
-    parser.add_argument("--qz", type=float, default=0.0, help="Cartesian Qz slice in inverse Angstrom.")
-    parser.add_argument("--qz-tol", type=float, default=1.0e-8, help="Absolute tolerance for the Qz slice.")
+    parser.add_argument(
+        "--gmax",
+        type=float,
+        default=3.0,
+        help="Radial |Q| cutoff in units of the shortest in-plane primitive reciprocal-vector length.",
+    )
+    parser.add_argument("--qz", type=float, default=0.0, help="Fractional reciprocal q_3 slice.")
+    parser.add_argument("--qz-tol", type=float, default=1.0e-8, help="Absolute tolerance for the fractional q_3 slice.")
     parser.add_argument(
         "--eigenvector-gauge",
         choices=("raw", "phonopy_to_phx"),

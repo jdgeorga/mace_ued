@@ -10,7 +10,7 @@ from typing import Sequence
 
 import h5py
 import matplotlib.pyplot as plt
-from matplotlib.colors import LogNorm
+from matplotlib.colors import LogNorm, Normalize
 import numpy as np
 
 from mlip_phonon_scattering.electron_scattering_factors import (
@@ -148,38 +148,57 @@ def load_reduced_q_for_eigenvectors(h5: h5py.File, q_frac: np.ndarray) -> np.nda
     return center_fractional_coords(q_frac)
 
 
-def hex_shell_index(h: int, k: int) -> int:
-    return max(abs(h), abs(k), abs(h + k))
+def inplane_reciprocal_norm_limit(bvec_rows: np.ndarray, gmax: float) -> float:
+    """Return the Cartesian |Q| cutoff corresponding to dimensionless G_max."""
+
+    if gmax < 0.0:
+        raise ValueError("gmax must be >= 0.")
+    return float(gmax) * shortest_inplane_primitive_g_modulus(bvec_rows)
+
+
+def _integer_translation_search_extent(q_frac: np.ndarray, bvec_rows: np.ndarray, q_norm_max: float) -> int:
+    inplane_bvec = np.asarray(bvec_rows[:2], dtype=float)
+    singular_values = np.linalg.svd(inplane_bvec, compute_uv=False)
+    min_singular = float(np.min(singular_values))
+    if min_singular <= EPS:
+        raise ValueError("First two reciprocal basis vectors do not span a finite in-plane lattice.")
+    q_extent = float(np.max(np.linalg.norm(q_frac @ bvec_rows, axis=1))) if q_frac.size else 0.0
+    return int(np.ceil((q_norm_max + q_extent) / min_singular)) + 1
 
 
 def build_tiled_q_grid(
     q_frac: np.ndarray,
     bvec_rows: np.ndarray,
-    gmax: int,
+    gmax: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    hk_list = [
-        (h, k)
-        for h in range(-gmax, gmax + 1)
-        for k in range(-gmax, gmax + 1)
-        if hex_shell_index(h, k) <= gmax
-    ]
+    q_norm_max = inplane_reciprocal_norm_limit(bvec_rows, gmax)
+    search_extent = _integer_translation_search_extent(q_frac, bvec_rows, q_norm_max)
+    q_frac_rows = []
+    q_cart_rows = []
+    source_iq_rows = []
+    h_rows = []
+    k_rows = []
     nq = q_frac.shape[0]
-    npts = nq * len(hk_list)
-    q_frac_all = np.zeros((npts, 3), dtype=float)
-    q_cart_all = np.zeros((npts, 3), dtype=float)
-    source_iq = np.zeros(npts, dtype=int)
-    h_all = np.zeros(npts, dtype=int)
-    k_all = np.zeros(npts, dtype=int)
     for iq in range(nq):
-        for j, (h, k) in enumerate(hk_list):
-            idx = iq * len(hk_list) + j
-            qf = q_frac[iq] + np.array([h, k, 0.0], dtype=float)
-            q_frac_all[idx] = qf
-            q_cart_all[idx] = qf @ bvec_rows
-            source_iq[idx] = iq
-            h_all[idx] = h
-            k_all[idx] = k
-    return q_frac_all, q_cart_all, source_iq, h_all, k_all
+        for h in range(-search_extent, search_extent + 1):
+            for k in range(-search_extent, search_extent + 1):
+                qf = q_frac[iq] + np.array([h, k, 0.0], dtype=float)
+                qc = qf @ bvec_rows
+                if np.linalg.norm(qc) <= q_norm_max + 1.0e-10:
+                    q_frac_rows.append(qf)
+                    q_cart_rows.append(qc)
+                    source_iq_rows.append(iq)
+                    h_rows.append(h)
+                    k_rows.append(k)
+    if not q_frac_rows:
+        raise ValueError(f"No tiled Q points found with |Q| <= {q_norm_max:g} A^-1.")
+    return (
+        np.asarray(q_frac_rows, dtype=float),
+        np.asarray(q_cart_rows, dtype=float),
+        np.asarray(source_iq_rows, dtype=int),
+        np.asarray(h_rows, dtype=int),
+        np.asarray(k_rows, dtype=int),
+    )
 
 
 def get_atomic_number(symbol: str) -> int:
@@ -389,7 +408,7 @@ def compute_tiled_intensities(
     *,
     temperature_k: float = 100.0,
     phwmin_mev: float = 0.2,
-    gmax: int = 3,
+    gmax: float = 3.0,
     electron_scattering_model: str = "peng",
 ) -> TiledIntensityData:
     """Compute tiled zero- and one-phonon intensities from a phonon mesh."""
@@ -489,7 +508,15 @@ def compute_temperature_dependent_ued(
 
 
 def qz_mask(data: TiledIntensityData, qz: float = 0.0, qz_tol: float = 1.0e-8) -> np.ndarray:
-    return np.isclose(data.q_cart_all[:, 2], qz, atol=qz_tol)
+    """Mask the fractional reciprocal-lattice q_3 plane.
+
+    The qz0 UED maps are intended to show the in-plane reciprocal-lattice slice
+    Q = (h, k, q_3).  For non-orthogonal primitive cells, especially primitive
+    FCC/diamond cells, Cartesian Qz = 0 is a tilted condition and can collapse a
+    q_3 = 0 plane to a line in the plotted Qx-Qy map.
+    """
+
+    return np.isclose(data.q_frac_all[:, 2], qz, atol=qz_tol)
 
 
 def shortest_inplane_primitive_g_modulus(bvec_rows_anginv: np.ndarray) -> float:
@@ -507,6 +534,26 @@ def shortest_inplane_primitive_g_modulus(bvec_rows_anginv: np.ndarray) -> float:
             ]
         )
     )
+
+
+def q3_plane_cartesian_coordinates(
+    q_cart_all: np.ndarray,
+    bvec_rows_anginv: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Project Q points onto an orthonormal basis spanning fractional q_3 = 0."""
+
+    b0 = np.asarray(bvec_rows_anginv[0], dtype=float)
+    b1 = np.asarray(bvec_rows_anginv[1], dtype=float)
+    e0_norm = np.linalg.norm(b0)
+    if e0_norm <= EPS:
+        raise ValueError("First reciprocal basis vector has zero length.")
+    e0 = b0 / e0_norm
+    b1_perp = b1 - np.dot(b1, e0) * e0
+    e1_norm = np.linalg.norm(b1_perp)
+    if e1_norm <= EPS:
+        raise ValueError("First two reciprocal basis vectors do not span a plane.")
+    e1 = b1_perp / e1_norm
+    return q_cart_all @ e0, q_cart_all @ e1
 
 
 def integer_reciprocal_mask(q_frac_all: np.ndarray) -> np.ndarray:
@@ -711,7 +758,7 @@ def plot_dw_factor_vs_temperature(path: Path, data: TemperatureDependentUEDData)
     ax.set_ylim(bottom=0.0)
     ax.grid(True, alpha=0.25)
     ax.legend(frameon=False, fontsize=8)
-    fig.savefig(path, dpi=240, bbox_inches="tight")
+    fig.savefig(path, dpi=600, bbox_inches="tight")
     plt.close(fig)
     return path
 
@@ -727,7 +774,7 @@ def plot_zero_phonon_intensity_vs_temperature(path: Path, data: TemperatureDepen
         ax.set_ylabel("I0")
         ax.grid(True, alpha=0.25)
     fig.suptitle("Zero-Phonon Bragg Intensity vs Temperature")
-    fig.savefig(path, dpi=240, bbox_inches="tight")
+    fig.savefig(path, dpi=600, bbox_inches="tight")
     plt.close(fig)
     return path
 
@@ -741,11 +788,19 @@ def plot_q_map(
     title: str,
     colorbar_label: str,
     origin_exclude_radius_inv_a: float | None = None,
-    marker_size: float = 1.0,
+    marker_size: float = 1.5,
+    plot_x: np.ndarray | None = None,
+    plot_y: np.ndarray | None = None,
+    xlabel: str = r"$Q_x$ ($\AA^{-1}$)",
+    ylabel: str = r"$Q_y$ ($\AA^{-1}$)",
+    color_scale: str = "log",
+    log_vmin_fraction: float | None = None,
 ) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    plot_mask = mask & np.isfinite(data.q_cart_all[:, 0]) & np.isfinite(data.q_cart_all[:, 1])
-    rho = np.hypot(data.q_cart_all[:, 0], data.q_cart_all[:, 1])
+    x_all = data.q_cart_all[:, 0] if plot_x is None else np.asarray(plot_x, dtype=float)
+    y_all = data.q_cart_all[:, 1] if plot_y is None else np.asarray(plot_y, dtype=float)
+    plot_mask = mask & np.isfinite(x_all) & np.isfinite(y_all)
+    rho = np.hypot(x_all, y_all)
     if origin_exclude_radius_inv_a is not None and origin_exclude_radius_inv_a > 0.0:
         plot_mask &= rho >= origin_exclude_radius_inv_a
     if not np.any(plot_mask):
@@ -753,8 +808,8 @@ def plot_q_map(
             "No tiled Q points left after masking; check Qz filter and "
             "origin_exclude_radius_inv_a relative to reciprocal geometry."
         )
-    x = data.q_cart_all[plot_mask, 0]
-    y = data.q_cart_all[plot_mask, 1]
+    x = x_all[plot_mask]
+    y = y_all[plot_mask]
     z = values[plot_mask]
     pos = z > EPS
     if not np.any(pos):
@@ -769,15 +824,28 @@ def plot_q_map(
     if vmin >= vmax:
         vmax = vmin * np.sqrt(10.0)
 
-    norm = LogNorm(vmin=vmin, vmax=vmax)
+    colorbar_extend = "max"
+    if color_scale == "log":
+        if log_vmin_fraction is not None:
+            if log_vmin_fraction <= 0.0 or log_vmin_fraction >= 1.0:
+                raise ValueError("log_vmin_fraction must be between 0 and 1.")
+            unclipped_vmin = vmin
+            vmin = max(vmin, vmax * log_vmin_fraction)
+            if vmin > unclipped_vmin:
+                colorbar_extend = "both"
+        norm = LogNorm(vmin=vmin, vmax=vmax)
+    elif color_scale == "linear":
+        norm = Normalize(vmin=vmin, vmax=vmax)
+    else:
+        raise ValueError("color_scale must be 'log' or 'linear'.")
     fig, ax = plt.subplots(figsize=(6.0, 5.2))
-    scatter = ax.scatter(x, y, c=z_pos, s=marker_size, linewidths=0.0, cmap="magma", norm=norm)
+    scatter = ax.scatter(x, y, c=z_pos, s=marker_size, marker="h", linewidths=0.0, cmap="magma", norm=norm)
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel(r"$Q_x$ ($\AA^{-1}$)")
-    ax.set_ylabel(r"$Q_y$ ($\AA^{-1}$)")
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel(ylabel)
     ax.set_title(title)
-    fig.colorbar(scatter, ax=ax, label=colorbar_label, extend="max")
-    fig.savefig(path, dpi=240, bbox_inches="tight")
+    fig.colorbar(scatter, ax=ax, label=colorbar_label, extend=colorbar_extend)
+    fig.savefig(path, dpi=600, bbox_inches="tight")
     plt.close(fig)
     return path
 
@@ -788,7 +856,7 @@ def write_qz0_outputs(
     *,
     temperature_k: float = 100.0,
     phwmin_mev: float = 0.2,
-    gmax: int = 3,
+    gmax: float = 3.0,
     qz: float = 0.0,
     qz_tol: float = 1.0e-8,
     electron_scattering_model: str = "peng",
@@ -810,7 +878,7 @@ def write_qz0_outputs(
     )
     mask = qz_mask(data, qz=qz, qz_tol=qz_tol)
     if not np.any(mask):
-        raise ValueError(f"No tiled Q points found with Qz={qz:g} within tolerance {qz_tol:g}.")
+        raise ValueError(f"No tiled Q points found with q_3={qz:g} within tolerance {qz_tol:g}.")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     outputs = {}
@@ -822,42 +890,54 @@ def write_qz0_outputs(
     s1_total = np.sum(data.one_phonon_structure_factor, axis=1)
     i1_total = np.sum(data.one_phonon_intensity, axis=1)
     reciprocal_lattice_mask = integer_reciprocal_mask(data.q_frac_all)
+    q_plane_1, q_plane_2 = q3_plane_cartesian_coordinates(data.q_cart_all, mesh.bvec_rows_anginv)
+    plane_axis_kwargs = {
+        "plot_x": q_plane_1,
+        "plot_y": q_plane_2,
+        "xlabel": r"$Q_{\parallel 1}$ ($\AA^{-1}$)",
+        "ylabel": r"$Q_{\parallel 2}$ ($\AA^{-1}$)",
+    }
     outputs["zero_phonon_png"] = plot_q_map(
         output_dir / "zero_phonon_intensity_qz0.png",
         data,
         data.zero_phonon_intensity,
         mask & reciprocal_lattice_mask,
-        title="Zero-Phonon Intensity (Qz = 0)",
+        title=r"Zero-Phonon Intensity ($q_3 = 0$)",
         colorbar_label="I0",
         origin_exclude_radius_inv_a=origin_mask_radius,
-        marker_size=6.0,
+        marker_size=8.0,
+        **plane_axis_kwargs,
     )
     outputs["one_phonon_structure_factor_png"] = plot_q_map(
         output_dir / "one_phonon_structure_factor_total_qz0.png",
         data,
         s1_total,
         mask,
-        title="Total One-Phonon Structure Factor (Qz = 0)",
+        title=r"Total One-Phonon Structure Factor ($q_3 = 0$)",
         colorbar_label="S1 total",
         origin_exclude_radius_inv_a=origin_mask_radius,
+        **plane_axis_kwargs,
     )
     outputs["one_phonon_intensity_png"] = plot_q_map(
         output_dir / "one_phonon_intensity_total_qz0.png",
         data,
         i1_total,
         mask,
-        title="Total One-Phonon Intensity (Qz = 0)",
+        title=r"Total One-Phonon Intensity ($q_3 = 0$)",
         colorbar_label="I1 total",
         origin_exclude_radius_inv_a=origin_mask_radius,
+        log_vmin_fraction=1.0e-4,
+        **plane_axis_kwargs,
     )
     outputs["combined_intensity_png"] = plot_q_map(
         output_dir / "combined_intensity_qz0.png",
         data,
         data.zero_phonon_intensity + i1_total,
         mask,
-        title="Combined Intensity (Qz = 0)",
+        title=r"Combined Intensity ($q_3 = 0$)",
         colorbar_label="I0 + I1",
         origin_exclude_radius_inv_a=origin_mask_radius,
+        **plane_axis_kwargs,
     )
     if temperature_sweep_k is not None:
         temp_data = compute_temperature_dependent_ued(

@@ -9,9 +9,13 @@ from mlip_phonon_scattering.ued_intensity import (
     TiledIntensityData,
     align_reduced_q_to_full_mesh,
     apply_phonopy_to_phx_eigenvector_gauge,
+    build_tiled_q_grid,
     center_fractional_coords,
     compute_temperature_dependent_ued,
     compute_zero_phonon_intensity,
+    inplane_reciprocal_norm_limit,
+    q3_plane_cartesian_coordinates,
+    qz_mask,
     write_temperature_csv,
     write_wide_csv,
 )
@@ -89,6 +93,80 @@ def test_phonopy_to_phx_eigenvector_gauge_applies_q_tau_phase() -> None:
     phase = np.exp(+2j * np.pi * (mesh.q_reduced_frac @ mesh.tau_frac.T))
     assert np.allclose(gauged.eigenvectors, raw_eigenvectors * phase[:, None, :, None])
     assert np.allclose(mesh.eigenvectors, raw_eigenvectors)
+
+
+def test_qz_mask_selects_fractional_q3_plane_for_tilted_cells() -> None:
+    data = TiledIntensityData(
+        q_frac_all=np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.25, 0.0, 0.0],
+                [0.0, 0.25, 0.0],
+                [0.25, 0.25, 0.25],
+            ],
+            dtype=float,
+        ),
+        q_cart_all=np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.5],
+                [0.0, 1.0, -0.5],
+                [1.0, 1.0, 0.0],
+            ],
+            dtype=float,
+        ),
+        source_iq=np.arange(4, dtype=int),
+        h=np.zeros(4, dtype=int),
+        k=np.zeros(4, dtype=int),
+        omega_ev=np.ones((4, 1), dtype=float),
+        n0=np.zeros((4, 1), dtype=float),
+        lq2=np.ones((4, 1), dtype=float),
+        dw_exponent=np.zeros((4, 1), dtype=float),
+        dw_factor=np.ones((4, 1), dtype=float),
+        zero_phonon_intensity=np.zeros(4, dtype=float),
+        one_phonon_structure_factor=np.ones((4, 1), dtype=float),
+        one_phonon_intensity=np.ones((4, 1), dtype=float),
+        species=["Si"],
+    )
+
+    assert np.array_equal(qz_mask(data), np.array([True, True, True, False]))
+
+
+def test_tiled_q_grid_uses_radial_cartesian_cutoff() -> None:
+    q_frac = np.array([[0.0, 0.0, 0.0], [0.45, 0.0, 0.0]], dtype=float)
+    bvec_rows = np.eye(3)
+
+    _q_frac_all, q_cart_all, _source_iq, _h_all, _k_all = build_tiled_q_grid(q_frac, bvec_rows, gmax=1.0)
+
+    assert np.all(np.linalg.norm(q_cart_all, axis=1) <= inplane_reciprocal_norm_limit(bvec_rows, 1.0) + 1.0e-10)
+    assert not np.any(np.all(np.isclose(q_cart_all, [1.45, 0.0, 0.0]), axis=1))
+
+
+def test_q3_plane_coordinates_do_not_collapse_edge_on_cartesian_projection() -> None:
+    bvec_rows = np.array(
+        [
+            [-1.0, 1.0, 1.0],
+            [1.0, -1.0, 1.0],
+            [1.0, 1.0, -1.0],
+        ],
+        dtype=float,
+    )
+    q_frac = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [0.25, 0.0, 0.0],
+            [0.0, 0.25, 0.0],
+        ],
+        dtype=float,
+    )
+    q_cart = q_frac @ bvec_rows
+
+    assert np.allclose(q_cart[:, 1], -q_cart[:, 0])
+
+    q_plane_1, q_plane_2 = q3_plane_cartesian_coordinates(q_cart, bvec_rows)
+
+    assert len(np.unique(np.round(q_plane_1, 10))) > 1
+    assert len(np.unique(np.round(q_plane_2, 10))) > 1
 
 
 def test_wide_csv_combined_intensity_uses_sparse_zero_phonon_term(tmp_path) -> None:
