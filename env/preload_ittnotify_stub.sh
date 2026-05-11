@@ -9,7 +9,7 @@ fi
 
 _MLIP_ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _MLIP_REPO_ROOT="$(cd "${_MLIP_ENV_DIR}/.." && pwd)"
-_MLIP_ITTNOTIFY_STUB="${MLIP_ITTNOTIFY_STUB:-${_MLIP_REPO_ROOT}/../4-Diffuse-Intensity/ittnotify_stub/libittnotify.so}"
+_MLIP_ITTNOTIFY_STUB="${MLIP_ITTNOTIFY_STUB:-${_MLIP_REPO_ROOT}/ittnotify_stub/libittnotify.so}"
 
 if [[ ! -r "${_MLIP_ITTNOTIFY_STUB}" ]]; then
   echo "ITT Notify stub not found: ${_MLIP_ITTNOTIFY_STUB}" >&2

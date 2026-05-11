@@ -71,9 +71,9 @@ source env/preload_ittnotify_stub.sh
 ```
 
 The helper resolves the default stub relative to this repository as
-`../4-Diffuse-Intensity/ittnotify_stub/libittnotify.so`. If the stub lives
-somewhere else, set `MLIP_ITTNOTIFY_STUB=/path/to/libittnotify.so` before
-sourcing the helper.
+`ittnotify_stub/libittnotify.so`, so the checkout is portable. If the stub
+lives somewhere else, set `MLIP_ITTNOTIFY_STUB=/path/to/libittnotify.so`
+before sourcing the helper.
 
 ## Quick Start
 
