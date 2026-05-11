@@ -67,8 +67,13 @@ If importing `torch` fails with an `iJIT_NotifyEvent` symbol error on NERSC,
 preload the local ITT stub before running MACE stages:
 
 ```bash
-export LD_PRELOAD=/pscratch/sd/j/jdgeorga/twist-anything/phonon_unfolding/scratch/phonon_diff/ued_paper/4-Diffuse-Intensity/ittnotify_stub/libittnotify.so:${LD_PRELOAD:-}
+source env/preload_ittnotify_stub.sh
 ```
+
+The helper resolves the default stub relative to this repository as
+`../4-Diffuse-Intensity/ittnotify_stub/libittnotify.so`. If the stub lives
+somewhere else, set `MLIP_ITTNOTIFY_STUB=/path/to/libittnotify.so` before
+sourcing the helper.
 
 ## Quick Start
 
@@ -87,7 +92,7 @@ Both examples inherit these defaults from `run_mlip_phonons.sh`:
 - relaxation steps: `STEPS=500`
 - UED temperature: `100 K`
 - UED temperature sweep: `0:50:1500 K`
-- UED temperature Bragg targets: `G = (1,0,0)` and `G = (1,1,0)`; Si overrides to `G = (2,2,0)` and `G = (3,1,0)`
+- UED temperature Bragg targets: `G = (1,0,0)` and `G = (1,1,0)`; Si (primitive cell) overrides to `G = (1,1,1)` and `G = (1,1,0)`
 - UED phonon cutoff: `0.2 meV`
 - UED reciprocal tiling: `GMAX=3`
 - tiled UED CSV output: disabled by the MoS2 and Si example wrappers to reduce runtime and memory
