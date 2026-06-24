@@ -8,7 +8,7 @@ from ase.io import read, write
 from ase.io.trajectory import Trajectory
 from ase.optimize import FIRE
 
-from .calculator import MACECalculatorConfig, build_mace_foundation_calculator
+from .calculator import MACECalculatorConfig, build_calculator
 
 
 def relax_structure(
@@ -23,7 +23,7 @@ def relax_structure(
     """Relax an input structure and write ``.xyz``, ``.traj``, and ``.traj.xyz`` outputs."""
 
     atoms = read(input_file, format=input_format)
-    atoms.calc = build_mace_foundation_calculator(calculator_config)
+    atoms.calc = build_calculator(calculator_config, atoms)
 
     unrelaxed_energy = atoms.get_potential_energy()
     print(f"Unrelaxed total energy: {unrelaxed_energy:.8f} eV", flush=True)

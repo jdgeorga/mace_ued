@@ -7,7 +7,7 @@ from typing import Iterable
 
 import numpy as np
 
-from .calculator import MACECalculatorConfig, build_mace_foundation_calculator
+from .calculator import MACECalculatorConfig, build_calculator
 from .phonopy_io import load_displaced_supercells
 
 
@@ -24,7 +24,10 @@ def _chunk_indices(n_items: int, n_chunks: int) -> list[tuple[int, int]]:
 
 
 def _evaluate_structures(atoms_list: Iterable, calculator_config: MACECalculatorConfig):
-    calc = build_mace_foundation_calculator(calculator_config)
+    atoms_list = list(atoms_list)
+    if not atoms_list:
+        return [], []
+    calc = build_calculator(calculator_config, atoms_list[0])
     forces = []
     energies = []
     for i, atoms in enumerate(atoms_list, start=1):

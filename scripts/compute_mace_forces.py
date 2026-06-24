@@ -6,7 +6,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from mlip_phonon_scattering.calculator import add_mace_arguments, config_from_args
+from mlip_phonon_scattering.calculator import (
+    add_interlayer_arguments,
+    add_mace_arguments,
+    config_from_args,
+)
 from mlip_phonon_scattering.forces import compute_displacement_forces
 
 
@@ -17,6 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--forces-output", default="forces.npy", help="Output NumPy force array.")
     parser.add_argument("--energies-output", default="energies.npy", help="Output NumPy energy array.")
     add_mace_arguments(parser)
+    add_interlayer_arguments(parser)
     return parser.parse_args()
 
 
