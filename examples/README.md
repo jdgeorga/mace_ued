@@ -37,3 +37,11 @@ Each example writes temperature-dependent UED diagnostics under
 The examples set `UED_WRITE_TILED_CSV=0`, so they do not write
 `tiled_intensities_qz0.csv` or `tiled_intensities_qz0_long.csv` unless you
 override with `UED_WRITE_TILED_CSV=1`.
+
+## Linewidth and lifetime examples
+
+[`mose2_wse2_bilayer`](mose2_wse2_bilayer/) is the MoSe2/WSe2 aligned-bilayer GPU pipeline. It uses the intralayer MoSe2 and WSe2 models plus the MoSe2/WSe2 interlayer model, and its self-contained validation checks the expected bilayer modes in addition to the general physics checks.
+
+[`mose2_monolayer`](mose2_monolayer/) is the single-model MoSe2 GPU pipeline. It uses the 4x4x1 fc3 and 8x8x1 phonon supercells, and is physics-validated through its self-contained checks rather than against a golden reference.
+
+Both pipelines HANG at `srun -n 16 --gpus-per-task=1` (16-rank mpi4py/PMI wireup deadlock, device-independent). Must run at `srun --overlap -n 4 --gpus-per-task=1` (`MPI_RANKS=4`); `--overlap` is required so successive `srun` steps within one allocation don't deadlock on GPU-slice accounting.

@@ -1,0 +1,12 @@
+run_lifetime/
+lifetime_run/
+*.npy
+*.npz
+*.h5
+figures/
+*.traj
+*.log
+phono3py_disp.yaml
+phonopy_disp.yaml
+phono3py_cache_*/
+phonon_cache_*/
