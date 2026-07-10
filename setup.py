@@ -45,6 +45,8 @@ setup(
         "scripts/compute_mace_forces.py",
         "scripts/solve_phonons.py",
         "scripts/extract_uq_intensities.py",
+        "scripts/relax_structure_qe.py",
+        "scripts/compute_qe_forces.py",
     ],
     classifiers=[
         "Programming Language :: Python :: 3",
