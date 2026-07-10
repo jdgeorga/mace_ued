@@ -90,10 +90,15 @@ def main() -> int:
     gamma_band_order: np.ndarray | None = None
     gamma_index: int | None = None
 
+    meta: dict[str, Any] = {}
     try:
         with np.load(args.gamma_npz) as data:
             gamma = np.asarray(data["gamma_W_full"], dtype=float)
             qpoints = np.asarray(data["qpoints_frac"], dtype=float)
+            for key in ("temperature_K", "mesh_numbers", "nband"):
+                if key in data:
+                    value = data[key]
+                    meta[key] = value.tolist() if hasattr(value, "tolist") else value
     except Exception as exc:  # noqa: BLE001
         _add_check(checks, "gamma_shape_finiteness", False, path=args.gamma_npz, error=str(exc))
     else:
@@ -109,6 +114,24 @@ def main() -> int:
             finite=finite,
             min=minimum,
             max=float(gamma.max()) if gamma.size else float("nan"),
+        )
+        # The NPZ's own metadata must match what was requested — guards against a result
+        # produced at a different temperature / mesh / band count silently passing.
+        meta_temp = float(meta["temperature_K"]) if "temperature_K" in meta else None
+        meta_mesh = list(meta["mesh_numbers"]) if "mesh_numbers" in meta else None
+        meta_nband = int(meta["nband"]) if "nband" in meta else None
+        meta_ok = bool(
+            meta_temp is not None and abs(meta_temp - args.temperature) < 1e-6
+            and meta_mesh is not None and meta_mesh == list(mesh)
+            and meta_nband is not None and meta_nband == args.expected_bands
+        )
+        _add_check(
+            checks,
+            "gamma_metadata",
+            meta_ok,
+            temperature_K=meta_temp, requested_temperature=args.temperature,
+            mesh_numbers=meta_mesh, requested_mesh=list(mesh),
+            nband=meta_nband, expected_bands=args.expected_bands,
         )
 
         tau = np.where(gamma > 0, 1.0 / (4.0 * np.pi * gamma), np.inf)
@@ -137,7 +160,9 @@ def main() -> int:
             primitive_matrix=ph3.primitive_matrix,
         )
         phonon.force_constants = np.load(args.fc2)
-        phonon.symmetrize_force_constants()
+        # Do NOT re-symmetrize here: validate the fc2 exactly as the pipeline consumes it (the
+        # cache is already produced with symmetrize_fc2=True). Re-symmetrizing could mask a
+        # corrupted/asymmetric cache and let it pass.
         phonon.run_mesh(list(mesh), is_gamma_center=True)
         mesh_dict = phonon.get_mesh_dict()
         frequencies = np.asarray(mesh_dict["frequencies"], dtype=float)
@@ -170,13 +195,23 @@ def main() -> int:
         if qpoints.ndim != 2 or qpoints.shape[1] != 3:
             _add_check(checks, "gamma_point_acoustic", False, qpoints_shape=qpoints.shape, error="invalid qpoints_frac")
         else:
-            gamma_index = int(np.argmin(_wrapped_distance(qpoints)))
+            dists = _wrapped_distance(qpoints)
+            gamma_index = int(np.argmin(dists))
+            gamma_at_origin = bool(dists[gamma_index] < 1e-9)      # nearest q must actually BE Γ
+            qcount_ok = bool(gamma.shape[0] == qpoints.shape[0])   # γ rows must align with qpoints
             acoustic_frequencies = gamma_frequencies[gamma_band_order]
-            acoustic_gamma = gamma[gamma_index, gamma_band_order]
+            acoustic_gamma = gamma[gamma_index, gamma_band_order] if qcount_ok else np.array([np.nan])
             _add_check(
                 checks,
                 "gamma_point_acoustic",
-                bool(np.all(acoustic_frequencies < 0.05) and np.all(acoustic_gamma <= 1e-4)),
+                bool(
+                    gamma_at_origin and qcount_ok
+                    and np.all(acoustic_frequencies < 0.05)
+                    and np.all(acoustic_gamma <= 1e-4)
+                ),
+                gamma_at_origin=gamma_at_origin,
+                wrapped_distance=float(dists[gamma_index]),
+                qcount_match=qcount_ok,
                 qpoint_index=gamma_index,
                 qpoint=qpoints[gamma_index],
                 bands=gamma_band_order,

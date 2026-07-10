@@ -25,16 +25,13 @@ from typing import List, Optional
 import numpy as np
 from mpi4py import MPI
 
-# Force local forked phono3py implementation first (contains lang="GPU" path).
-# The fork (phono3py_einsum) is normally pip-installed editable so `import
-# phono3py` already resolves to it; this sys.path shim is a belt-and-suspenders
-# fallback. It honors PHONO3PY_EINSUM_PATH (set by load_mace_phonon_env.sh),
-# else looks for the sibling repos/phono3py_einsum checkout.
-THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-LOCAL_PHONO3PY_EINSUM = os.environ.get("PHONO3PY_EINSUM_PATH") or os.path.abspath(
-    os.path.join(THIS_DIR, "../../phono3py_einsum")
-)
-if os.path.isdir(LOCAL_PHONO3PY_EINSUM) and LOCAL_PHONO3PY_EINSUM not in sys.path:
+# The forked phono3py (phono3py_einsum, which provides the lang="GPU" path) is
+# pip-installed editable, so `import phono3py` already resolves to it.
+# PHONO3PY_EINSUM_PATH (exported by load_mace_phonon_env.sh) is an optional
+# belt-and-suspenders override. The former repo-relative guess (../../phono3py_einsum)
+# is invalid now that this module lives inside the installed package, so it is removed.
+LOCAL_PHONO3PY_EINSUM = os.environ.get("PHONO3PY_EINSUM_PATH")
+if LOCAL_PHONO3PY_EINSUM and os.path.isdir(LOCAL_PHONO3PY_EINSUM) and LOCAL_PHONO3PY_EINSUM not in sys.path:
     sys.path.insert(0, LOCAL_PHONO3PY_EINSUM)
 
 try:
