@@ -48,6 +48,17 @@ setup(
         "scripts/relax_structure_qe.py",
         "scripts/compute_qe_forces.py",
     ],
+    entry_points={
+        "console_scripts": [
+            "mlip-linewidth-relax = mlip_phonon_scattering.linewidth.relax:main",
+            "mlip-linewidth-phonopy-yaml = mlip_phonon_scattering.linewidth.displacements:main_phonopy",
+            "mlip-linewidth-phono3py-yaml = mlip_phonon_scattering.linewidth.displacements:main_phono3py",
+            "mlip-linewidth-forces2 = mlip_phonon_scattering.linewidth.forces3:main_forces2",
+            "mlip-linewidth-forces3 = mlip_phonon_scattering.linewidth.forces3:main_forces3",
+            "mlip-linewidth-forces2-from3 = mlip_phonon_scattering.linewidth.forces3:main_forces2_from3",
+            "mlip-linewidth-cache-fc = mlip_phonon_scattering.linewidth.fc_cache:main",
+        ],
+    },
     classifiers=[
         "Programming Language :: Python :: 3",
         "Operating System :: POSIX :: Linux",
