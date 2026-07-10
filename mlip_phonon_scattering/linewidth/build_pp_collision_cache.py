@@ -30,25 +30,11 @@ DEFAULT_SUPPORT_POLICY = "existing_support"
 
 
 def _install_local_phono3py() -> str | None:
-    here = Path(__file__).resolve().parent
-    candidates = []
     env_path = os.environ.get("PHONO3PY_EINSUM_PATH")
-    if env_path:
-        candidates.append(Path(env_path))
-    candidates.extend(
-        [
-            here.parents[2] / "phonopy_codes" / "phono3py_einsum",
-            here.parents[2] / "phonon_codes" / "phono3py_einsum",
-            here.parents[1] / "phonopy_codes" / "phono3py_einsum",
-            here.parents[1] / "phonon_codes" / "phono3py_einsum",
-        ]
-    )
-    for path in candidates:
-        if path.is_dir():
-            path_s = str(path)
-            if path_s not in sys.path:
-                sys.path.insert(0, path_s)
-            return path_s
+    if env_path and os.path.isdir(env_path):
+        if env_path not in sys.path:
+            sys.path.insert(0, env_path)
+        return env_path
     return None
 
 

@@ -55,24 +55,14 @@ import numpy as np
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Local forked phono3py (contains lang="GPU" path).  Honor $PHONO3PY_EINSUM_PATH
-# (set by env/setup_env.sh) first; fall back to a couple of repo-relative guesses
-# so the module also works without the env var.
+# The forked phono3py (phono3py_einsum, which provides the ``lang="GPU"`` path)
+# is normally installed as a package. PHONO3PY_EINSUM_PATH is an optional local
+# override exported by the environment setup.
 # ─────────────────────────────────────────────────────────────────────────────
 def _resolve_phono3py_einsum_path() -> Optional[str]:
     env_path = os.environ.get("PHONO3PY_EINSUM_PATH")
-    candidates: List[str] = []
-    if env_path:
-        candidates.append(env_path)
-    this_dir = os.path.dirname(os.path.abspath(__file__))
-    # dynamics/w_scatter/ -> paper_v4 is 2 levels up; phonopy_codes is a sibling
-    # of the ued_paper tree (../../../../phonopy_codes from here historically).
-    candidates.append(
-        os.path.abspath(os.path.join(this_dir, "../../../../../phonopy_codes/phono3py_einsum"))
-    )
-    for cand in candidates:
-        if cand and os.path.isdir(cand):
-            return os.path.abspath(cand)
+    if env_path and os.path.isdir(env_path):
+        return os.path.abspath(env_path)
     return None
 
 
