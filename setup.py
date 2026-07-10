@@ -57,6 +57,10 @@ setup(
             "mlip-linewidth-forces3 = mlip_phonon_scattering.linewidth.forces3:main_forces3",
             "mlip-linewidth-forces2-from3 = mlip_phonon_scattering.linewidth.forces3:main_forces2_from3",
             "mlip-linewidth-cache-fc = mlip_phonon_scattering.linewidth.fc_cache:main",
+            "mlip-linewidth-scatter-gpu = mlip_phonon_scattering.linewidth.gpu_scattering_W_phonons_bilayer_comm_mesh:main",
+            "mlip-linewidth-extract-gamma = mlip_phonon_scattering.linewidth.extract_gamma_example:main",
+            "mlip-linewidth-plot = mlip_phonon_scattering.linewidth.plot_linewidth_example:main",
+            "mlip-linewidth-validate = mlip_phonon_scattering.linewidth.validate:main",
         ],
     },
     classifiers=[

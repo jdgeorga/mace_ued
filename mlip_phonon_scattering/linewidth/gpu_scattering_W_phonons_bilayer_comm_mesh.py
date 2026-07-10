@@ -524,7 +524,7 @@ def save_w_matrix_hdf5(
         h5.attrs["W_q_indexing_scope"] = "ir"
 
 
-def main(
+def run_scattering(
     phono3py_yaml: str,
     fc2_forces_npy: str,
     fc3_forces_npy: str,
@@ -792,9 +792,9 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def main() -> None:
     args = _parse_args()
-    main(
+    run_scattering(
         phono3py_yaml=args.phono3py_yaml,
         fc2_forces_npy=args.fc2_forces,
         fc3_forces_npy=args.fc3_forces,
@@ -814,3 +814,7 @@ if __name__ == "__main__":
         ir_index_start=args.ir_index_start,
         ir_index_stop=args.ir_index_stop,
     )
+
+
+if __name__ == "__main__":
+    main()
