@@ -23,16 +23,23 @@ def _chunk_indices(n_items: int, n_chunks: int) -> list[tuple[int, int]]:
     return chunks
 
 
-def _evaluate_structures(atoms_list: Iterable, calculator_config: MACECalculatorConfig):
+def evaluate_structures(
+    atoms_list: Iterable,
+    calculator_config: MACECalculatorConfig,
+    *,
+    compute_energies: bool = True,
+    nlayer_atoms=None,
+):
     atoms_list = list(atoms_list)
     if not atoms_list:
         return [], []
-    calc = build_calculator(calculator_config, atoms_list[0])
+    calc = build_calculator(calculator_config, atoms_list[0], nlayer_atoms=nlayer_atoms)
     forces = []
     energies = []
     for i, atoms in enumerate(atoms_list, start=1):
         atoms.calc = calc
-        energies.append(float(atoms.get_potential_energy()))
+        if compute_energies:
+            energies.append(float(atoms.get_potential_energy()))
         forces.append(atoms.get_forces())
         if i == 1 or i % 10 == 0:
             print(f"Computed MACE forces for {i} local displacement structures", flush=True)
@@ -62,7 +69,7 @@ def compute_displacement_forces(
 
     if MPI is None:
         print(f"Running serial force calculation for {n_structures} structures", flush=True)
-        forces, energies = _evaluate_structures(displaced, calculator_config)
+        forces, energies = evaluate_structures(displaced, calculator_config)
         np.save(forces_output, np.asarray(forces))
         np.save(energies_output, np.asarray(energies))
         return
@@ -85,7 +92,7 @@ def compute_displacement_forces(
         print(f"Rank {rank}: no structures assigned", flush=True)
     else:
         print(f"Rank {rank}: received {len(local_atoms)} structures", flush=True)
-        local_forces, local_energies = _evaluate_structures(local_atoms, calculator_config)
+        local_forces, local_energies = evaluate_structures(local_atoms, calculator_config)
 
     gathered_forces = comm.gather(local_forces, root=0)
     gathered_energies = comm.gather(local_energies, root=0)

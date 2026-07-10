@@ -49,7 +49,7 @@ def build_mace_foundation_calculator(config: MACECalculatorConfig):
         # compatibility shim, which retries without those kwargs; fall back to the
         # stock calculator if the helper is unavailable.
         try:
-            from macewrapper import CompatMACECalculator as _LocalCalculator
+            from .interlayer.macewrapper import CompatMACECalculator as _LocalCalculator
         except ImportError:
             _LocalCalculator = MACECalculator
         return _LocalCalculator(
@@ -68,7 +68,7 @@ def build_mace_foundation_calculator(config: MACECalculatorConfig):
     return mace_mp(**kwargs)
 
 
-def build_nlayer_calculator(config: MACECalculatorConfig, atoms):
+def build_nlayer_calculator(config: MACECalculatorConfig, atoms, *, nlayer_atoms=None):
     """Build a stacked ``NLayerCalculator`` from per-layer and interlayer models.
 
     The calculator is bound to ``atoms``: per-layer and interlayer ``MACEWCalculator``
@@ -78,8 +78,8 @@ def build_nlayer_calculator(config: MACECalculatorConfig, atoms):
     """
 
     try:
-        from macewrapper import MACEWCalculator
-        from n_layer import NLayerCalculator
+        from .interlayer.macewrapper import MACEWCalculator
+        from .interlayer.n_layer import NLayerCalculator
     except ImportError as exc:
         raise ImportError(
             "Could not import the interlayer helpers (macewrapper / n_layer). Ensure "
@@ -150,10 +150,11 @@ def build_nlayer_calculator(config: MACECalculatorConfig, atoms):
             )
         )
 
-    return NLayerCalculator([atoms], intralayer_calcs, interlayer_calcs, layer_symbols)
+    bound_atoms = [atoms] if nlayer_atoms is None else nlayer_atoms
+    return NLayerCalculator(bound_atoms, intralayer_calcs, interlayer_calcs, layer_symbols)
 
 
-def build_calculator(config: MACECalculatorConfig, atoms=None):
+def build_calculator(config: MACECalculatorConfig, atoms=None, *, nlayer_atoms=None):
     """Dispatch to the interlayer or single foundation-model calculator builder."""
 
     if config.interlayer:
@@ -162,7 +163,7 @@ def build_calculator(config: MACECalculatorConfig, atoms=None):
                 "Interlayer mode requires an `atoms` structure to build the "
                 "stacked calculator."
             )
-        return build_nlayer_calculator(config, atoms)
+        return build_nlayer_calculator(config, atoms, nlayer_atoms=nlayer_atoms)
     return build_mace_foundation_calculator(config)
 
 
