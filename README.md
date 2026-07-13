@@ -19,6 +19,22 @@ fine-tuned model or a stacked split-MLIP calculator; see
 [Split MLIP architecture](#split-mlip-architecture) and
 [Force generation](#force-generation).
 
+## Setup
+
+Building and activating the environment is documented separately from this
+README:
+
+- [`SETUP_MACE_PHONO3PY.md`](SETUP_MACE_PHONO3PY.md) — recreation guide for the
+  full pipeline environment on NERSC Perlmutter: the `mace-interlayer` fork,
+  the `phono3py_einsum` GPU stack, model weights, and end-to-end verification.
+  It builds on the harmonic MACE/phonopy environment (`SETUP_MACE_PHONON.md`,
+  shipped on the `split-mlip` branch), which it treats as a prerequisite.
+- [`THEORY_MACE_PHONO3PY.md`](THEORY_MACE_PHONO3PY.md) — the physics behind the
+  lifetime pipeline (three-phonon scattering, linewidths, lifetimes) and its
+  invariants.
+
+All commands below assume that environment is active.
+
 ## Split MLIP architecture
 
 Layered van der Waals materials (e.g. a MoSe2/WSe2 bilayer) are described more
@@ -54,7 +70,8 @@ external is:
 
 - the **mace-interlayer fork** of `mace-torch` — it must be installed instead of
   upstream `mace-torch`, which is why `mace` is deliberately excluded from
-  `install_requires` (see the note in `setup.py` and `SETUP_MACE_PHONON.md`); and
+  `install_requires` (see the note in `setup.py` and
+  [`SETUP_MACE_PHONO3PY.md`](SETUP_MACE_PHONO3PY.md)); and
 - the **trained model weights**, which are not committed. Examples resolve
   `$MODELS` (default `$MLIP_PHONON_ROOT/models`) and expect `MoSe2.model`,
   `WSe2.model`, and `MoSe2_WSe2.model`.
@@ -87,62 +104,6 @@ split intralayer/interlayer models) do not accept mace-torch 0.3.16's newer
 
 See `docs/ued_temperature_outputs.md` for details on the temperature-dependent
 UED Bragg figures.
-
-## Environment
-
-On NERSC, the existing project environment is:
-
-```bash
-source /pscratch/sd/j/jdgeorga/twist-anything/phonon_unfolding/scratch/phonon_diff/phonon_2.6_env/bin/activate
-```
-
-That environment is only a convenience. To create a separate environment on a
-machine that does not have access to it, use Python 3.10 or newer and install
-the workflow dependencies:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install numpy h5py matplotlib ase phonopy mace-torch pytest
-```
-
-For a CPU-only setup, install a CPU PyTorch build before installing
-`mace-torch` if your package manager does not choose one automatically. For a
-CUDA setup, install the PyTorch build that matches your local CUDA driver, then
-install `mace-torch`.
-
-For the split-MLIP and phono3py-lifetime workflows, do **not** install upstream
-`mace-torch`; install the `mace-interlayer` fork editable first (see the note in
-`setup.py` and `SETUP_MACE_PHONON.md`), then `pip install -e .` here to register
-the `mlip-linewidth-*` console scripts.
-
-The driver defaults to the NERSC project interpreter. If you are using your own
-environment, either activate it and call the stage scripts directly with
-`python`, or set `PYTHON` when running the common driver:
-
-```bash
-PYTHON="$(which python)" bash run_mlip_phonons.sh /path/to/input_structure.xyz /path/to/output_prefix
-```
-
-The repository root must be on `PYTHONPATH` when running scripts from outside
-this directory:
-
-```bash
-export PYTHONPATH=/path/to/mlip_phonon_scattering:${PYTHONPATH:-}
-```
-
-If importing `torch` fails with an `iJIT_NotifyEvent` symbol error on NERSC,
-preload the local ITT stub before running MACE stages:
-
-```bash
-source env/preload_ittnotify_stub.sh
-```
-
-The helper resolves the default stub relative to this repository as
-`ittnotify_stub/libittnotify.so`, so the checkout is portable. If the stub
-lives somewhere else, set `MLIP_ITTNOTIFY_STUB=/path/to/libittnotify.so`
-before sourcing the helper.
 
 ## Quick Start
 
@@ -381,9 +342,8 @@ stages live in `mlip_phonon_scattering/linewidth/` and are installed as
 phono3py displacements, 2nd- and 3rd-order forces, force-constant cache, GPU
 scattering, gamma extraction, plotting, and validation).
 
-Install `phono3py_einsum` as a package. If it is not importable, point
-`PHONO3PY_EINSUM_PATH` at a local checkout; the example env-load script
-(`load_mace_phonon_env.sh`) exports it for you.
+Install `phono3py_einsum` as a package, or point `PHONO3PY_EINSUM_PATH` at a
+local checkout; both are covered in [Setup](#setup).
 
 The relax and force stages take the same two model configurations as the
 harmonic pipeline (see [Force generation](#force-generation)): a single
