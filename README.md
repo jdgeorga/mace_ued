@@ -11,13 +11,17 @@ Self-contained workflow for MACE-based phonons and Qz=0 UED intensities:
 The current UED default converts phonopy HDF5 eigenvectors to the PH.x-style
 phase gauge with `--eigenvector-gauge phonopy_to_phx`.
 
+This branch additionally provides a phonon-linewidth / lifetime workflow built on
+a GPU-enabled phono3py fork; see [Phonon Lifetimes (phono3py)](#phonon-lifetimes-phono3py).
+
 ## Layout
 
-- `mlip_phonon_scattering/`: Python package.
-- `scripts/`: command-line entry points for each workflow stage.
-- `run_mlip_phonons.sh`: end-to-end driver.
-- `examples/`: clean MoS2 and Si handoff examples.
-- `example_archive/`: old MoS2 and Si examples plus generated outputs.
+- `mlip_phonon_scattering/`: Python package, including `linewidth/` (phono3py
+  lifetime stages) and `interlayer/` (NLayerCalculator support for bilayers).
+- `scripts/`: command-line entry points for the phonon and UED workflow stages.
+- `run_mlip_phonons.sh`: end-to-end phonon + UED driver.
+- `examples/`: MoS2 and Si UED examples, plus MoSe2 monolayer and MoSe2/WSe2
+  bilayer lifetime examples.
 - `docs/`: implementation notes.
 - `tests/`: focused unit tests.
 
@@ -224,7 +228,8 @@ The temperature-dependent outputs use the same phonon mesh and Debye-Waller
 calculation as the Qz=0 UED maps. `temperature_dependent_bragg.csv` stores the
 per-atom Debye-Waller factors and zero-phonon intensities at each requested
 temperature target. The common defaults are `G = (1,0,0)` and `G = (1,1,0)`;
-the Si example overrides these to `G = (2,2,0)` and `G = (3,1,0)`.
+the Si example (primitive cell) overrides these to `G = (1,1,1)` (allowed
+reflection) and `G = (1,1,0)` (systematic absence).
 `dw_factor_vs_temperature.png` plots species-averaged Debye-Waller factors for
 the requested Bragg vectors, and
 `zero_phonon_intensity_vs_temperature.png` plots the corresponding elastic
@@ -234,6 +239,32 @@ The MoS2 and Si example wrappers set `UED_WRITE_TILED_CSV=0` because the tiled
 wide and long CSVs are much larger than the figures and dominate UED extraction
 time and memory. Set `UED_WRITE_TILED_CSV=1` if those tabular Q-point exports are
 needed.
+
+## Phonon Lifetimes (phono3py)
+
+This branch adds a phonon-linewidth / lifetime workflow built on a GPU-enabled
+phono3py fork (`phono3py_einsum`, which provides the `lang="GPU"` path). The
+stages live in `mlip_phonon_scattering/linewidth/` and are installed as
+`mlip-linewidth-*` console scripts by `pip install -e .` (relax, phonopy /
+phono3py displacements, 2nd- and 3rd-order forces, force-constant cache, GPU
+scattering, gamma extraction, plotting, and validation).
+
+Install `phono3py_einsum` as a package. If it is not importable, point
+`PHONO3PY_EINSUM_PATH` at a local checkout; the example env-load script
+(`load_mace_phonon_env.sh`) exports it for you.
+
+Two self-contained GPU examples exercise the pipeline end to end:
+
+- `examples/mose2_monolayer/`: single-model MoSe2 monolayer, physics-validated by
+  its own checks (no golden reference).
+- `examples/mose2_wse2_bilayer/`: MoSe2/WSe2 aligned bilayer (intralayer plus
+  interlayer models), validated against a golden reference.
+
+Both run inside a Perlmutter GPU allocation via `bash run_salloc_pipeline.sh`.
+They must run at `srun --overlap -n 4 --gpus-per-task=1` (`MPI_RANKS=4`): a
+16-rank launch deadlocks in mpi4py/PMI wireup, and `--overlap` keeps successive
+`srun` steps within one allocation from deadlocking on GPU-slice accounting. See
+each example's README for validated numbers.
 
 ## Verification
 

@@ -1,7 +1,9 @@
 # Examples
 
-This folder contains the clean handoff examples. Older MoS2 and Si examples,
-including generated run outputs, were moved to `../example_archive/`.
+The MoS2 and Si examples run the MACE phonon + Qz=0 UED pipeline; the MoSe2
+monolayer and MoSe2/WSe2 bilayer examples run the phono3py linewidth / lifetime
+pipeline (see [Linewidth and lifetime examples](#linewidth-and-lifetime-examples)
+below).
 
 Defaults inherited from `../run_mlip_phonons.sh`:
 
@@ -28,7 +30,7 @@ Each example writes temperature-dependent UED diagnostics under
 
 - `temperature_dependent_bragg.csv`: per-atom Debye-Waller factors and
   zero-phonon intensities from 0 K to 1500 K in 50 K steps. MoS2 uses
-  `G = (1,0,0)` and `G = (1,1,0)`; Si uses `G = (2,2,0)` and `G = (3,1,0)`.
+  `G = (1,0,0)` and `G = (1,1,0)`; Si uses `G = (1,1,1)` and `G = (1,1,0)`.
 - `dw_factor_vs_temperature.png`: species-averaged Debye-Waller factors
   versus temperature for both Bragg vectors.
 - `zero_phonon_intensity_vs_temperature.png`: two-subplot elastic
