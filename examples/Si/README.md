@@ -1,6 +1,6 @@
 # Si Example
 
-Clean Si workflow using `Si.xyz` by default.
+Si workflow using `Si.xyz` by default.
 
 ```bash
 bash examples/Si/run_si.sh

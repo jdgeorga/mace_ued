@@ -1,6 +1,6 @@
 # MoS2 Example
 
-Clean MoS2 workflow using `MoS2.xyz` by default.
+MoS2 workflow using `MoS2.xyz` by default.
 
 ```bash
 bash examples/MoS2/run_mos2.sh

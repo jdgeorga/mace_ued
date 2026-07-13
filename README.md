@@ -16,8 +16,7 @@ phase gauge with `--eigenvector-gauge phonopy_to_phx`.
 - `mlip_phonon_scattering/`: Python package.
 - `scripts/`: command-line entry points for each workflow stage.
 - `run_mlip_phonons.sh`: end-to-end driver.
-- `examples/`: clean MoS2 and Si handoff examples.
-- `example_archive/`: old MoS2 and Si examples plus generated outputs.
+- `examples/`: MoS2 and Si examples.
 - `docs/`: implementation notes.
 - `tests/`: focused unit tests.
 
@@ -224,7 +223,7 @@ The temperature-dependent outputs use the same phonon mesh and Debye-Waller
 calculation as the Qz=0 UED maps. `temperature_dependent_bragg.csv` stores the
 per-atom Debye-Waller factors and zero-phonon intensities at each requested
 temperature target. The common defaults are `G = (1,0,0)` and `G = (1,1,0)`;
-the Si example overrides these to `G = (2,2,0)` and `G = (3,1,0)`.
+the Si example overrides these to `G = (1,1,1)` and `G = (1,1,0)`.
 `dw_factor_vs_temperature.png` plots species-averaged Debye-Waller factors for
 the requested Bragg vectors, and
 `zero_phonon_intensity_vs_temperature.png` plots the corresponding elastic
