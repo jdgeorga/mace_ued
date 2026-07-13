@@ -37,6 +37,8 @@ README:
 - [`THEORY_MACE_PHONO3PY.md`](THEORY_MACE_PHONO3PY.md) — the physics behind
   the lifetime pipeline (three-phonon scattering, linewidths, lifetimes) and
   its invariants.
+- [`AGENTS.md`](AGENTS.md) — day-to-day operating guide for working in the
+  finished setup (env activation, running the examples, troubleshooting).
 
 All commands below assume that environment is active.
 
