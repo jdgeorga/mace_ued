@@ -1,6 +1,9 @@
 # Examples
 
-This folder contains the clean MoS2 and Si handoff examples.
+This folder contains the clean MoS2 and Si handoff examples. Both use the single
+MACE foundation-model force path; for bilayer split intralayer/interlayer (MACE
+`NLayerCalculator`) runs see the "Split MLIP architecture" and "Force generation"
+sections of the top-level `../README.md`.
 
 Defaults inherited from `../run_mlip_phonons.sh`:
 

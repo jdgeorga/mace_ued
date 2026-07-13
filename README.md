@@ -11,21 +11,95 @@ Self-contained workflow for MACE-based phonons and Qz=0 UED intensities:
 The current UED default converts phonopy HDF5 eigenvectors to the PH.x-style
 phase gauge with `--eigenvector-gauge phonopy_to_phx`.
 
+The MACE force engine (steps 1 and 3) supports two model configurations: a single
+foundation or fine-tuned model applied to the whole structure, or a **split MLIP**
+that describes a bilayer with per-layer fine-tuned intralayer models plus a
+fine-tuned interlayer model, stacked by an `NLayerCalculator`. See
+[Split MLIP architecture](#split-mlip-architecture) and
+[Force generation](#force-generation).
+
+## Split MLIP architecture
+
+For a van der Waals bilayer, a single foundation model rarely captures both the
+stiff intralayer bonding and the soft interlayer coupling with the accuracy phonon
+calculations need. This branch instead composes several fine-tuned MACE models:
+
+- **Per-layer intralayer models.** Each layer gets its own fine-tuned MACE model
+  (e.g. `MoSe2.model`, `WSe2.model`) that describes only the in-plane bonding of
+  that layer.
+- **Adjacent-pair interlayer models.** Each adjacent layer pair gets a fine-tuned
+  interlayer MACE model (e.g. `MoSe2_WSe2.model`) that describes the coupling
+  between the two layers.
+- **`NLayerCalculator` stacking.** `mlip_phonon_scattering.calculator.build_nlayer_calculator()`
+  builds one `MACEWCalculator` per layer and one per adjacent layer pair, then wraps
+  them in an `NLayerCalculator` whose total energy and forces are the sum of the
+  per-layer intralayer contributions and the interlayer-pair contributions.
+
+Layers are identified by the `atom_types` array carried on the input structure.
+Each layer occupies a contiguous range of `atom_types` values sized by its
+`--layer-symbols` entry: the first `len(symbols[0])` types form layer 0, the next
+`len(symbols[1])` types form layer 1, and so on. Intralayer calculators are sliced
+from the atoms in a single layer's range; each interlayer calculator is sliced from
+the union of an adjacent pair's ranges. Inputs therefore must carry `atom_types`
+(and `layer_ids`); a foundation-model input does not need them.
+
+`build_calculator()` dispatches on the `--interlayer` flag: without it, the single
+foundation/fine-tuned path (`build_mace_foundation_calculator()`) is used; with it,
+the split path (`build_nlayer_calculator()`) is used and requires the `atoms` to
+build against. The split path validates that there is exactly one intralayer model
+per layer and one interlayer model per adjacent pair (one fewer than the number of
+layers).
+
+### Requirements
+
+- **`mace-interlayer` fork.** The split path builds `MACEWCalculator` /
+  `NLayerCalculator` from the interlayer helper modules `macewrapper` and `n_layer`,
+  which are **not** vendored in this repository on this branch. They are imported
+  from `PYTHONPATH`, expected at `repos/mace-interlayer/examples/interlayer_helpers`
+  (`load_mace_phonon_env.sh` puts them there). The `mace` package itself must be the
+  forked `mace-interlayer` build (which provides `is_interlayer_calc` / `layer_ids`
+  support), installed instead of upstream `mace-torch` — this is why `mace` is
+  deliberately excluded from `install_requires` (see `setup.py` and Installation).
+- **Model weights.** The fine-tuned model files are not stored in the repository.
+  Examples expect them under `$MODELS` (default `$MLIP_PHONON_ROOT/models`),
+  e.g. `MoSe2.model`, `WSe2.model`, and `MoSe2_WSe2.model`.
+
+### Invoking a split run
+
+The split path is driven through the stage scripts directly (the `run_mlip_phonons.sh`
+driver only passes single-model flags). Both `scripts/relax_structure.py` and
+`scripts/compute_mace_forces.py` accept the interlayer flags; the relax step for a
+MoSe2/WSe2 bilayer looks like:
+
+```bash
+python scripts/relax_structure.py bilayer.xyz runs/bilayer/relaxed \
+  --interlayer \
+  --intralayer-models "$MODELS/MoSe2.model" "$MODELS/WSe2.model" \
+  --interlayer-model "$MODELS/MoSe2_WSe2.model" \
+  --layer-symbols "[['Mo','Se','Se'],['W','Se','Se']]" \
+  --device cpu \
+  --fmax 1e-5 \
+  --steps 500
+```
+
+The matching force command is shown under
+[Force generation → Split intralayer + interlayer models](#split-intralayer--interlayer-models).
+
 ## Layout
 
 - `mlip_phonon_scattering/`: Python package.
 - `scripts/`: command-line entry points for each workflow stage.
-- `run_mlip_phonons.sh`: end-to-end driver.
+- `run_mlip_phonons.sh`: end-to-end driver (single-model MACE path).
 - `examples/`: clean MoS2 and Si handoff examples.
 - `docs/`: implementation notes.
 - `tests/`: focused unit tests.
 
-The stage scripts default to the MACE foundation model. Quantum ESPRESSO
-variants (`scripts/relax_structure_qe.py`, `scripts/compute_qe_forces.py`,
-backed by the `qe_*` modules) provide DFT relaxation and forces. The MACE relax
-and force stages also accept `--interlayer` with one or more `--interlayer-model`
-paths to build a stacked `NLayerCalculator` for bilayer/interlayer phonons (this
-requires the `mace-interlayer` fork; see Installation).
+The stage scripts default to the MACE foundation model. Quantum ESPRESSO variants
+(`scripts/relax_structure_qe.py`, `scripts/compute_qe_forces.py`, backed by the
+`qe_*` modules) provide DFT relaxation and forces as an alternative to the MACE
+relax and force stages. The split-MLIP interlayer path (`--interlayer`, see
+[Split MLIP architecture](#split-mlip-architecture)) requires the `mace-interlayer`
+fork; see Installation.
 
 See `docs/ued_temperature_outputs.md` for details on the temperature-dependent
 UED Bragg figures, and `docs/phonopy_eigenvector_gauge.md` for the eigenvector
@@ -42,7 +116,8 @@ pip install -e .
 This installs the Python dependencies (numpy, h5py, matplotlib, ase, phonopy)
 and the stage scripts as command-line tools. It intentionally does **not**
 install MACE: install `mace-torch` for single foundation-model runs, or install
-the `mace-interlayer` fork *before* this package for bilayer/interlayer runs.
+the `mace-interlayer` fork *before* this package for split intralayer/interlayer
+runs (upstream `mace-torch` lacks the interlayer support the split path needs).
 
 ## Environment
 
@@ -65,7 +140,10 @@ python -m pip install -e '.[test]'
 
 Then install MACE separately. For a CPU-only setup, install a CPU PyTorch build
 before `mace-torch`. For a CUDA setup, install the PyTorch build that matches
-your local CUDA driver, then install `mace-torch`.
+your local CUDA driver, then install `mace-torch`. For split intralayer/interlayer
+runs, install the `mace-interlayer` fork instead of upstream `mace-torch` and put
+its `examples/interlayer_helpers` directory (the `macewrapper` / `n_layer` modules)
+on `PYTHONPATH`; on NERSC, `load_mace_phonon_env.sh` does both.
 
 The driver defaults to the NERSC project interpreter. If you are using your own
 environment, either activate it and call the stage scripts directly with
@@ -130,7 +208,9 @@ DEVICE=cuda OUTPUT_PREFIX=/path/to/run/MoS2_mace_relaxed bash examples/MoS2/run_
 bash run_mlip_phonons.sh /path/to/input_structure.xyz /path/to/output_prefix
 ```
 
-Important overrides:
+The driver runs the single-model MACE path (foundation or one local model). Split
+intralayer/interlayer runs use the stage scripts directly (see
+[Force generation](#force-generation)). Important overrides:
 
 ```bash
 MACE_MODEL=medium
@@ -182,16 +262,8 @@ python scripts/generate_displacements.py runs/example/relaxed.xyz \
   --output runs/example/relaxed_phonon_displacements.yaml
 ```
 
-Compute forces:
-
-```bash
-python scripts/compute_mace_forces.py \
-  runs/example/relaxed.xyz \
-  runs/example/relaxed_phonon_displacements.yaml \
-  --forces-output runs/example/relaxed_forces.npy \
-  --energies-output runs/example/relaxed_energies.npy \
-  --mace-model medium
-```
+Forces for the phonopy displacements are their own stage; see
+[Force generation](#force-generation).
 
 Solve phonons:
 
@@ -217,6 +289,67 @@ python scripts/extract_uq_intensities.py \
   --no-tiled-csv \
   --eigenvector-gauge phonopy_to_phx \
   --electron-scattering-model peng
+```
+
+## Force generation
+
+Forces for the phonopy displacement supercells are computed with a MACE calculator
+by `scripts/compute_mace_forces.py`, which writes the `forces.npy` and
+`energies.npy` arrays that `solve_phonons.py` consumes. Two model configurations are
+supported: a single foundation/fine-tuned model, or a split intralayer + interlayer
+model stack.
+
+### Foundation or single fine-tuned model
+
+By default the force engine uses the MACE `mace_mp` foundation model selected by
+`--mace-model` (a size such as `small`/`medium`/`large` or a named model). Pass
+`--mace-model-path` to load a single local fine-tuned model instead; local compiled
+TorchScript models are loaded through the `CompatMACECalculator` shim (which retries
+without the newer forward kwargs that older models do not accept, falling back to the
+stock `MACECalculator`).
+
+```bash
+python scripts/compute_mace_forces.py \
+  runs/example/relaxed.xyz \
+  runs/example/relaxed_phonon_displacements.yaml \
+  --forces-output runs/example/relaxed_forces.npy \
+  --energies-output runs/example/relaxed_energies.npy \
+  --mace-model medium \
+  --device cpu
+```
+
+Swap `--mace-model medium` for `--mace-model-path /path/to/model.model` to use a
+single local fine-tuned model.
+
+### Split intralayer + interlayer models
+
+Add `--interlayer` to build the stacked `NLayerCalculator` from per-layer intralayer
+models and adjacent-pair interlayer models (see
+[Split MLIP architecture](#split-mlip-architecture)). The flags are:
+
+- `--intralayer-models`: one intralayer model path per layer (space-separated).
+- `--interlayer-model`: one interlayer model path per adjacent layer pair
+  (repeat the flag once per pair).
+- `--layer-symbols`: the per-layer chemical symbols as a Python literal, e.g.
+  `"[['Mo','Se','Se'],['W','Se','Se']]"`. This defines each layer's `atom_types`
+  range, so the input structure must carry the matching `atom_types` (and
+  `layer_ids`) arrays.
+
+This path requires the `mace-interlayer` fork and its `macewrapper` / `n_layer`
+helpers on `PYTHONPATH`, and the model files (default under `$MODELS`). For a
+MoSe2/WSe2 bilayer:
+
+```bash
+python scripts/compute_mace_forces.py \
+  runs/bilayer/relaxed.xyz \
+  runs/bilayer/relaxed_phonon_displacements.yaml \
+  --forces-output runs/bilayer/relaxed_forces.npy \
+  --energies-output runs/bilayer/relaxed_energies.npy \
+  --interlayer \
+  --intralayer-models "$MODELS/MoSe2.model" "$MODELS/WSe2.model" \
+  --interlayer-model "$MODELS/MoSe2_WSe2.model" \
+  --layer-symbols "[['Mo','Se','Se'],['W','Se','Se']]" \
+  --device cpu
 ```
 
 ## Outputs
