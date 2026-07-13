@@ -18,6 +18,20 @@ fine-tuned interlayer model, stacked by an `NLayerCalculator`. See
 [Split MLIP architecture](#split-mlip-architecture) and
 [Force generation](#force-generation).
 
+## Setup
+
+Building and activating the environment is documented separately from this
+README:
+
+- [`SETUP_MACE_PHONON.md`](SETUP_MACE_PHONON.md) — recreation guide for the
+  environment on NERSC Perlmutter: MACE and the `mace-interlayer` fork, the
+  Quantum ESPRESSO variant, model weights, and end-to-end verification.
+- [`THEORY_MACE_PHONON.md`](THEORY_MACE_PHONON.md) — what each pipeline stage
+  does physically and mathematically, from the MLIP force engine to the
+  harmonic phonon band structure.
+
+All commands below assume that environment is active.
+
 ## Split MLIP architecture
 
 For a van der Waals bilayer, a single foundation model rarely captures both the
@@ -56,7 +70,7 @@ layers).
   `NLayerCalculator` from the interlayer helper modules `macewrapper` and `n_layer`,
   which are **not** vendored in this repository on this branch. They are imported
   from `PYTHONPATH`, expected at `repos/mace-interlayer/examples/interlayer_helpers`
-  (`load_mace_phonon_env.sh` puts them there). The `mace` package itself must be the
+  (see [Setup](#setup)). The `mace` package itself must be the
   forked `mace-interlayer` build (which provides `is_interlayer_calc` / `layer_ids`
   support), installed instead of upstream `mace-torch` — this is why `mace` is
   deliberately excluded from `install_requires` (see `setup.py` and Installation).
@@ -118,59 +132,6 @@ and the stage scripts as command-line tools. It intentionally does **not**
 install MACE: install `mace-torch` for single foundation-model runs, or install
 the `mace-interlayer` fork *before* this package for split intralayer/interlayer
 runs (upstream `mace-torch` lacks the interlayer support the split path needs).
-
-## Environment
-
-On NERSC, the existing project environment is:
-
-```bash
-source /pscratch/sd/j/jdgeorga/twist-anything/phonon_unfolding/scratch/phonon_diff/phonon_2.6_env/bin/activate
-```
-
-That environment is only a convenience. On another machine, use Python 3.10 or
-newer, create a virtual environment, and `pip install -e .` (see Installation)
-to pull in the dependencies:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e '.[test]'
-```
-
-Then install MACE separately. For a CPU-only setup, install a CPU PyTorch build
-before `mace-torch`. For a CUDA setup, install the PyTorch build that matches
-your local CUDA driver, then install `mace-torch`. For split intralayer/interlayer
-runs, install the `mace-interlayer` fork instead of upstream `mace-torch` and put
-its `examples/interlayer_helpers` directory (the `macewrapper` / `n_layer` modules)
-on `PYTHONPATH`; on NERSC, `load_mace_phonon_env.sh` does both.
-
-The driver defaults to the NERSC project interpreter. If you are using your own
-environment, either activate it and call the stage scripts directly with
-`python`, or set `PYTHON` when running the common driver:
-
-```bash
-PYTHON="$(which python)" bash run_mlip_phonons.sh /path/to/input_structure.xyz /path/to/output_prefix
-```
-
-The repository root must be on `PYTHONPATH` when running scripts from outside
-this directory (an editable `pip install -e .` handles this automatically):
-
-```bash
-export PYTHONPATH=/path/to/mlip_phonon_scattering:${PYTHONPATH:-}
-```
-
-If importing `torch` fails with an `iJIT_NotifyEvent` symbol error on NERSC,
-preload the local ITT stub before running MACE stages:
-
-```bash
-source env/preload_ittnotify_stub.sh
-```
-
-The helper resolves the default stub relative to this repository as
-`ittnotify_stub/libittnotify.so`, so the checkout is portable. If the stub
-lives somewhere else, set `MLIP_ITTNOTIFY_STUB=/path/to/libittnotify.so`
-before sourcing the helper.
 
 ## Quick Start
 
