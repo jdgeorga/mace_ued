@@ -29,6 +29,8 @@ README:
 - [`THEORY_MACE_PHONON.md`](THEORY_MACE_PHONON.md) — what each pipeline stage
   does physically and mathematically, from the MLIP force engine to the
   harmonic phonon band structure.
+- [`AGENTS.md`](AGENTS.md) — day-to-day operating guide for working in the
+  finished setup (env activation, running the examples, troubleshooting).
 
 All commands below assume that environment is active.
 
