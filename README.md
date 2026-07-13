@@ -24,14 +24,19 @@ fine-tuned model or a stacked split-MLIP calculator; see
 Building and activating the environment is documented separately from this
 README:
 
-- [`SETUP_MACE_PHONO3PY.md`](SETUP_MACE_PHONO3PY.md) — recreation guide for the
-  full pipeline environment on NERSC Perlmutter: the `mace-interlayer` fork,
-  the `phono3py_einsum` GPU stack, model weights, and end-to-end verification.
-  It builds on the harmonic MACE/phonopy environment (`SETUP_MACE_PHONON.md`,
-  shipped on the `split-mlip` branch), which it treats as a prerequisite.
-- [`THEORY_MACE_PHONO3PY.md`](THEORY_MACE_PHONO3PY.md) — the physics behind the
-  lifetime pipeline (three-phonon scattering, linewidths, lifetimes) and its
-  invariants.
+- [`SETUP_MACE_PHONON.md`](SETUP_MACE_PHONON.md) — recreation guide for the
+  harmonic environment on NERSC Perlmutter: MACE and the `mace-interlayer`
+  fork, the Quantum ESPRESSO variant, model weights, and end-to-end
+  verification. Build this first.
+- [`SETUP_MACE_PHONO3PY.md`](SETUP_MACE_PHONO3PY.md) — builds the anharmonic
+  lifetime stack (the `phono3py_einsum` GPU fork) on top of the harmonic
+  environment, with its own end-to-end verification.
+- [`THEORY_MACE_PHONON.md`](THEORY_MACE_PHONON.md) — what each harmonic
+  pipeline stage does physically and mathematically, from the MLIP force
+  engine to the phonon band structure.
+- [`THEORY_MACE_PHONO3PY.md`](THEORY_MACE_PHONO3PY.md) — the physics behind
+  the lifetime pipeline (three-phonon scattering, linewidths, lifetimes) and
+  its invariants.
 
 All commands below assume that environment is active.
 
