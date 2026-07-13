@@ -17,12 +17,32 @@ phase gauge with `--eigenvector-gauge phonopy_to_phx`.
 - `scripts/`: command-line entry points for each workflow stage.
 - `run_mlip_phonons.sh`: end-to-end driver.
 - `examples/`: clean MoS2 and Si handoff examples.
-- `example_archive/`: old MoS2 and Si examples plus generated outputs.
 - `docs/`: implementation notes.
 - `tests/`: focused unit tests.
 
+The stage scripts default to the MACE foundation model. Quantum ESPRESSO
+variants (`scripts/relax_structure_qe.py`, `scripts/compute_qe_forces.py`,
+backed by the `qe_*` modules) provide DFT relaxation and forces. The MACE relax
+and force stages also accept `--interlayer` with one or more `--interlayer-model`
+paths to build a stacked `NLayerCalculator` for bilayer/interlayer phonons (this
+requires the `mace-interlayer` fork; see Installation).
+
 See `docs/ued_temperature_outputs.md` for details on the temperature-dependent
-UED Bragg figures.
+UED Bragg figures, and `docs/phonopy_eigenvector_gauge.md` for the eigenvector
+gauge convention used by the UED default.
+
+## Installation
+
+Install the package editable from the repository root:
+
+```bash
+pip install -e .
+```
+
+This installs the Python dependencies (numpy, h5py, matplotlib, ase, phonopy)
+and the stage scripts as command-line tools. It intentionally does **not**
+install MACE: install `mace-torch` for single foundation-model runs, or install
+the `mace-interlayer` fork *before* this package for bilayer/interlayer runs.
 
 ## Environment
 
@@ -32,21 +52,20 @@ On NERSC, the existing project environment is:
 source /pscratch/sd/j/jdgeorga/twist-anything/phonon_unfolding/scratch/phonon_diff/phonon_2.6_env/bin/activate
 ```
 
-That environment is only a convenience. To create a separate environment on a
-machine that does not have access to it, use Python 3.10 or newer and install
-the workflow dependencies:
+That environment is only a convenience. On another machine, use Python 3.10 or
+newer, create a virtual environment, and `pip install -e .` (see Installation)
+to pull in the dependencies:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install numpy h5py matplotlib ase phonopy mace-torch pytest
+python -m pip install -e '.[test]'
 ```
 
-For a CPU-only setup, install a CPU PyTorch build before installing
-`mace-torch` if your package manager does not choose one automatically. For a
-CUDA setup, install the PyTorch build that matches your local CUDA driver, then
-install `mace-torch`.
+Then install MACE separately. For a CPU-only setup, install a CPU PyTorch build
+before `mace-torch`. For a CUDA setup, install the PyTorch build that matches
+your local CUDA driver, then install `mace-torch`.
 
 The driver defaults to the NERSC project interpreter. If you are using your own
 environment, either activate it and call the stage scripts directly with
@@ -57,7 +76,7 @@ PYTHON="$(which python)" bash run_mlip_phonons.sh /path/to/input_structure.xyz /
 ```
 
 The repository root must be on `PYTHONPATH` when running scripts from outside
-this directory:
+this directory (an editable `pip install -e .` handles this automatically):
 
 ```bash
 export PYTHONPATH=/path/to/mlip_phonon_scattering:${PYTHONPATH:-}
@@ -224,7 +243,7 @@ The temperature-dependent outputs use the same phonon mesh and Debye-Waller
 calculation as the Qz=0 UED maps. `temperature_dependent_bragg.csv` stores the
 per-atom Debye-Waller factors and zero-phonon intensities at each requested
 temperature target. The common defaults are `G = (1,0,0)` and `G = (1,1,0)`;
-the Si example overrides these to `G = (2,2,0)` and `G = (3,1,0)`.
+the Si example overrides these to primitive-cell `G = (1,1,1)` and `G = (1,1,0)`.
 `dw_factor_vs_temperature.png` plots species-averaged Debye-Waller factors for
 the requested Bragg vectors, and
 `zero_phonon_intensity_vs_temperature.png` plots the corresponding elastic
