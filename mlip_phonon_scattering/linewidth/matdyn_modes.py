@@ -219,3 +219,103 @@ def load_matdyn_path(matdyn_in_path) -> np.ndarray:
         except ValueError as exc:
             raise ValueError(f"invalid q-point {iq}") from exc
     return np.asarray(points, dtype=np.float64)
+
+
+def main(argv=None):
+    """Run matdyn on a phono3py grid, gauge-align its modes, and save them."""
+
+    import argparse
+
+    from ase.io import read as ase_read
+
+    from mlip_phonon_scattering.linewidth import dfpt_read as _dfpt_read
+    from mlip_phonon_scattering.linewidth.dfpt_read import (
+        dynamical_matrix_from_dfpt,
+        frequencies_and_eigenvectors_at_q,
+    )
+    from mlip_phonon_scattering.linewidth.gauge import (
+        apply_selected_gauge,
+        select_gauge,
+    )
+
+    parser = argparse.ArgumentParser(
+        description="Run matdyn on phono3py's BZ grid; gauge-correct and write modes."
+    )
+    parser.add_argument("--phono3py-yaml", required=True)
+    parser.add_argument("--ifc-xml", required=True)
+    parser.add_argument(
+        "--mesh", nargs=3, type=int, required=True, metavar=("MX", "MY", "MZ")
+    )
+    parser.add_argument("--loto-2d", choices=["on", "off"], required=True)
+    parser.add_argument("--dfpt-fc2", required=True)
+    parser.add_argument("--dfpt-structure", required=True)
+    parser.add_argument(
+        "--dfpt-supercell-matrix",
+        nargs=3,
+        type=int,
+        default=[6, 6, 1],
+        metavar=("SX", "SY", "SZ"),
+    )
+    parser.add_argument("--workdir", default=None)
+    parser.add_argument("--out", required=True)
+    args = parser.parse_args(argv)
+
+    loto_2d = args.loto_2d == "on"
+    mesh = list(args.mesh)
+    grid_address, q_cryst = matdyn_qpoints_for_mesh(args.phono3py_yaml, mesh)
+
+    out_path = Path(args.out)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    workdir = Path(args.workdir) if args.workdir else out_path.parent
+    workdir.mkdir(parents=True, exist_ok=True)
+
+    flvec = run_matdyn(args.ifc_xml, q_cryst, loto_2d, workdir)
+    flfrq = workdir / "phband.freq"
+    structure = ase_read(args.dfpt_structure)
+    modes = parse_matdyn_modes(
+        flfrq, flvec, structure.get_masses(), grid_address=grid_address
+    )
+
+    e_qe = modes["eigenvectors"]
+    freqs = modes["frequencies"]
+    nb = e_qe.shape[1]
+    nat = e_qe.shape[2]
+    if nat * 3 != nb:
+        raise ValueError(f"unexpected band/atom count: nb={nb}, nat={nat}")
+
+    data = _dfpt_read.DfptData(
+        structure=structure,
+        fc2=np.load(args.dfpt_fc2),
+        supercell_matrix=np.diag(args.dfpt_supercell_matrix),
+        nac={},
+    )
+    dm = dynamical_matrix_from_dfpt(data)
+    e_ph = np.empty_like(e_qe)
+    freq_ph = np.empty_like(freqs)
+    for iq, q in enumerate(q_cryst):
+        freq_ph[iq], e_ph[iq] = frequencies_and_eigenvectors_at_q(dm, q)
+
+    transform, residual, qflip_perm = select_gauge(
+        e_ph, e_qe, q_cryst, structure.get_scaled_positions(), freqs=freq_ph
+    )
+    print(f"gauge transform: {transform}  residual={residual:.4g}")
+    gauged = apply_selected_gauge(
+        e_qe, q_cryst, structure.get_scaled_positions(), transform, qflip_perm
+    )
+
+    # Store primary layout; a later Phono3py consumer converts it to (Nq, nat*3, mode).
+    np.savez(
+        out_path,
+        frequencies=freqs,
+        eigenvectors=gauged,
+        grid_address=grid_address,
+        mesh=np.asarray(mesh),
+    )
+    print(
+        f"wrote {out_path}: Ngrid={len(grid_address)} nb={nb} nat={nat} "
+        f"loto_2d={loto_2d}"
+    )
+
+
+if __name__ == "__main__":
+    main()

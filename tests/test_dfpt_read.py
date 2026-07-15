@@ -33,3 +33,28 @@ def test_read_dfpt_nac_values():
     assert np.isclose(d.nac['alpha_ewald'], 0.98211261577626741, atol=1e-9)
     assert d.nac['periodic_axes'] == (0, 1)
     assert np.isclose(d.nac['factor'], 2.0)
+
+
+@pytest.mark.slow
+def test_read_dfpt_cli(tmp_path):
+    import subprocess
+    import sys
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "mlip_phonon_scattering.linewidth.dfpt_read",
+            "--dfpt-dir",
+            DFPT,
+            "--layer-symbols",
+            "[['Mo','Se','Se'],['W','Se','Se']]",
+            "--out-dir",
+            str(tmp_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    for filename in ("dfpt_structure.xyz", "dfpt_fc2.npy", "nac_2d.npz"):
+        assert (tmp_path / filename).exists()

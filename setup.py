@@ -61,6 +61,9 @@ setup(
             "mlip-linewidth-extract-gamma = mlip_phonon_scattering.linewidth.extract_gamma_example:main",
             "mlip-linewidth-plot = mlip_phonon_scattering.linewidth.plot_linewidth_example:main",
             "mlip-linewidth-validate = mlip_phonon_scattering.linewidth.validate:main",
+            "mlip-linewidth-read-dfpt = mlip_phonon_scattering.linewidth.dfpt_read:main",
+            "mlip-linewidth-matdyn-modes = mlip_phonon_scattering.linewidth.matdyn_modes:main",
+            "mlip-linewidth-compare = mlip_phonon_scattering.linewidth.compare_dispersion:main",
         ],
     },
     classifiers=[

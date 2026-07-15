@@ -7,6 +7,8 @@ import pytest
 from phonopy.structure.atoms import PhonopyAtoms
 import phono3py
 
+import mlip_phonon_scattering.linewidth.matdyn_modes as matdyn_modes
+
 from mlip_phonon_scattering.linewidth.matdyn_modes import (
     load_matdyn_path,
     load_phband_freq,
@@ -20,6 +22,7 @@ ROOT = Path("/pscratch/sd/j/jdgeorga/ued/tdbe_paper_prod_speed_density_fine/2-mo
 FLFRQ = ROOT / "phband.freq"
 FLVEC = ROOT / "matdyn.modes"
 MATDYN_IN = ROOT / "matdyn.in"
+DFPT = "/pscratch/sd/j/jdgeorga/ued/tdbe_paper_prod_speed_density_fine/2-mose2_wse2_6atoms/1-mf/ph_perq_d3fix"
 
 
 def test_matdyn_qpoints_for_mesh_uses_bzgrid_formula(tmp_path):
@@ -72,3 +75,68 @@ def test_matdyn_run_phband_acceptance_gate(tmp_path):
     delta = modes["frequencies_cm"] - load_phband_freq(tmp_path / "phband.freq")
     assert np.abs(delta).max() < 0.5
     assert np.sqrt(np.mean(delta**2)) < 0.1
+
+
+@pytest.mark.slow
+def test_matdyn_modes_cli_gauge_path(tmp_path, monkeypatch):
+    from mlip_phonon_scattering.linewidth.dfpt_read import main as dfpt_main
+
+    dfpt_main(
+        [
+            "--dfpt-dir",
+            DFPT,
+            "--layer-symbols",
+            "[['Mo','Se','Se'],['W','Se','Se']]",
+            "--out-dir",
+            str(tmp_path),
+        ]
+    )
+
+    real_q = load_matdyn_path(MATDYN_IN)
+    calls = {}
+
+    def fake_qpoints(phono3py_yaml, mesh):
+        calls["phono3py_yaml"] = phono3py_yaml
+        calls["mesh"] = list(mesh)
+        return np.arange(len(real_q) * 3).reshape(len(real_q), 3), real_q
+
+    def fake_run_matdyn(ifc_xml, qlist, loto_2d, workdir):
+        calls["loto_2d"] = loto_2d
+        calls["nq"] = len(qlist)
+        return str(FLVEC)
+
+    monkeypatch.setattr(matdyn_modes, "matdyn_qpoints_for_mesh", fake_qpoints)
+    monkeypatch.setattr(matdyn_modes, "run_matdyn", fake_run_matdyn)
+
+    out = tmp_path / "dfpt_modes_loto.npz"
+    matdyn_modes.main(
+        [
+            "--phono3py-yaml",
+            "unused.yaml",
+            "--ifc-xml",
+            "unused.xml",
+            "--mesh",
+            "12",
+            "12",
+            "1",
+            "--loto-2d",
+            "on",
+            "--dfpt-fc2",
+            str(tmp_path / "dfpt_fc2.npy"),
+            "--dfpt-structure",
+            str(tmp_path / "dfpt_structure.xyz"),
+            "--workdir",
+            str(ROOT),
+            "--out",
+            str(out),
+        ]
+    )
+
+    assert calls["mesh"] == [12, 12, 1]
+    assert calls["loto_2d"] is True
+    assert calls["nq"] == len(real_q)
+    assert out.exists()
+    saved = np.load(out)
+    assert saved["frequencies"].shape == (len(real_q), 18)
+    assert saved["eigenvectors"].shape == (len(real_q), 18, 6, 3)
+    assert saved["mesh"].tolist() == [12, 12, 1]

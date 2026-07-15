@@ -308,3 +308,119 @@ def read_dfpt(
         supercell_matrix=np.diag(dim),
         nac=nac,
     )
+
+
+QE_FREQUENCY_FACTOR_THZ = 108.97077184367376
+"""QE Ry/bohr**2/amu to THz conversion (not phonopy's VaspToTHz)."""
+
+
+def _acoustic_sum_rule_fixup(fc2: np.ndarray) -> np.ndarray:
+    """Return a working FC2 copy with a one-shot row-sum ASR correction.
+
+    This diagnostic/reference-only approximation must not be used to mutate the
+    raw FC2 stored in :class:`DfptData`. QE's ``matdyn.x`` applies its own more
+    careful symmetry-preserving ASR projection when diagonalizing.
+    """
+
+    fixed = fc2.astype(np.float64, copy=True)
+    idx = np.arange(fixed.shape[0])
+    fixed[idx, idx] -= fixed.sum(axis=1)
+    return fixed
+
+
+def dynamical_matrix_from_dfpt(data: "DfptData"):
+    """Build a plain, short-range-only phonopy dynamical matrix from DFPT data.
+
+    The primitive reconstruction follows :func:`read_dfpt` so its atom order
+    matches the returned primitive ASE structure and, consequently, the FC2
+    row/column order. A defensive comparison raises rather than silently using
+    mismatched force constants if phonopy's construction convention changes.
+    """
+
+    from phonopy.harmonic.dynamical_matrix import get_dynamical_matrix
+    from phonopy.structure.cells import get_primitive, get_supercell
+
+    from mlip_phonon_scattering.phonopy_io import ase_to_phonopy_atoms
+
+    unitcell = ase_to_phonopy_atoms(data.structure, include_masses=True)
+    scell = get_supercell(unitcell, data.supercell_matrix)
+    pcell = get_primitive(scell, np.linalg.inv(data.supercell_matrix))
+
+    delta = pcell.scaled_positions - unitcell.scaled_positions
+    delta -= np.rint(delta)
+    order_ok = list(pcell.symbols) == list(unitcell.symbols) and np.abs(
+        delta @ pcell.cell
+    ).max() < 1e-6
+    if not order_ok:
+        raise RuntimeError(
+            "Reconstructed primitive-cell atom order does not match "
+            "DfptData.structure; refusing to build a dynamical matrix that "
+            "would silently mis-index fc2."
+        )
+
+    return get_dynamical_matrix(
+        _acoustic_sum_rule_fixup(data.fc2), scell, pcell, nac_params=None
+    )
+
+
+def frequencies_and_eigenvectors_at_q(dm, q):
+    """Diagonalize ``dm`` at crystal ``q`` and return THz frequencies and modes."""
+
+    dm.run(np.asarray(q, dtype=float))
+    eigvals, eigvecs = np.linalg.eigh(dm.dynamical_matrix)
+    freq = np.sign(eigvals) * np.sqrt(np.abs(eigvals)) * QE_FREQUENCY_FACTOR_THZ
+    nat = eigvecs.shape[0] // 3
+    return freq, eigvecs.T.reshape(-1, nat, 3)
+
+
+def main(argv=None):
+    """Write reusable structure, raw FC2, and 2D-NAC artifacts from QE DFPT."""
+
+    import argparse
+    import ast
+
+    from ase.io import write as ase_write
+
+    parser = argparse.ArgumentParser(
+        description="Read DFPT structure/fc2/NAC and write mlip-linewidth artifacts."
+    )
+    parser.add_argument("--dfpt-dir", required=True)
+    parser.add_argument(
+        "--layer-symbols",
+        required=True,
+        help="Python literal, e.g. \"[['Mo','Se','Se'],['W','Se','Se']]\"",
+    )
+    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--symprec", type=float, default=1e-4)
+    args = parser.parse_args(argv)
+
+    data = read_dfpt(
+        args.dfpt_dir,
+        layer_symbols=ast.literal_eval(args.layer_symbols),
+        symprec=args.symprec,
+    )
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    structure_path = out_dir / "dfpt_structure.xyz"
+    fc2_path = out_dir / "dfpt_fc2.npy"
+    nac_path = out_dir / "nac_2d.npz"
+    ase_write(str(structure_path), data.structure, format="extxyz")
+    np.save(fc2_path, data.fc2)
+    np.savez(nac_path, **data.nac)
+
+    print(f"wrote {structure_path}")
+    print(f"wrote {fc2_path}  shape={data.fc2.shape}")
+    print(f"wrote {nac_path}  keys={sorted(data.nac)}")
+
+    ph_out_path = Path(args.dfpt_dir) / "q1" / "ph.out"
+    if ph_out_path.is_file():
+        dm = dynamical_matrix_from_dfpt(data)
+        freq_gamma, _ = frequencies_and_eigenvectors_at_q(dm, [0.0, 0.0, 0.0])
+        print(f"gate results: {check_d3_and_acoustic(ph_out_path, freq_gamma)}")
+    else:
+        print(f"gate check skipped: {ph_out_path} not found")
+
+
+if __name__ == "__main__":
+    main()
