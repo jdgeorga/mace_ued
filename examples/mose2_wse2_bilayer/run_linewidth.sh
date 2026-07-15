@@ -37,14 +37,7 @@ multi_rank() { srun --overlap -n "$MPI_RANKS" --gpus-per-task=1 "$@"; }
 single_rank() { srun --overlap -N1 -n1 --gpus-per-node=4 "$@"; }
 
 mkdir -p "$OUTPUT_DIR"
-# The GPU scatter engine derives its FC/gamma cache dirs (phonon_cache_*, phono3py_cache_*)
-# RELATIVE to the current working directory and os.chdir()s into the gamma cache on every
-# rank. Run from $OUTPUT_DIR so those relative caches coincide with the absolute paths steps
-# 4/6 use, and pre-create the gamma cache so a rank on another node never races the rank-0
-# mkdir (see the CWD==OUTPUT_DIR note in ../../../../SPLIT_MLIP_NOTES.md).
-mkdir -p "$GAMMA_CACHE"
-cd "$OUTPUT_DIR"
-echo "=== MoSe2/WSe2 bilayer: MPI_RANKS=$MPI_RANKS, output=$OUTPUT_DIR (cwd=$PWD) ==="
+echo "=== MoSe2/WSe2 bilayer: MPI_RANKS=$MPI_RANKS, output=$OUTPUT_DIR ==="
 echo "=== [1] relax ==="
 single_rank mlip-linewidth-relax "$INPUT" "$OUTPUT_DIR/$PREFIX" "${INTERLAYER_ARGS[@]}" --fmax 1.3e-5 --steps 1000 --maxstep 0.05 --device cuda
 echo "=== [2a] phonopy displacements (6 6 1) ==="
@@ -60,7 +53,7 @@ multi_rank mlip-linewidth-forces2-from3 "$REL" "$P3" "${INTERLAYER_ARGS[@]}" --s
 echo "=== [4] force-constant cache ==="
 mlip-linewidth-cache-fc --phono3py-yaml "$P3" --fc2-forces "$F23" --fc3-forces "$F3" --cache-dir "$FC_CACHE" --populate-mesh-cache
 echo "=== [5] GPU scattering (mesh 36 36 1) ==="
-multi_rank mlip-linewidth-scatter-gpu --phono3py-yaml "$P3" --fc2-forces "$F23" --fc3-forces "$F3" --mesh 36 36 1 --temperature 50 --batch-size 1 --fallback-lang NONE --max-w-gb 500 --force-recompute-gamma-detail --output "$W_OUT"
+multi_rank mlip-linewidth-scatter-gpu --phono3py-yaml "$P3" --fc2-forces "$F23" --fc3-forces "$F3" --mesh 36 36 1 --temperature 50 --batch-size 1 --fallback-lang NONE --max-w-gb 500 --force-recompute-gamma-detail --cache-dir "$GAMMA_CACHE" --fc-cache-dir "$FC_CACHE" --output "$W_OUT"
 echo "=== [6] extract gamma ==="
 mlip-linewidth-extract-gamma --w-h5 "$W_OUT" --cache-dir "$GAMMA_CACHE" --yaml "$P3" --mesh 36 36 1 --temperature 50 --out "$GAMMA_NPZ"
 echo "=== [7] plot linewidth and lifetime ==="

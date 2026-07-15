@@ -293,8 +293,12 @@ def compute_gamma_detail_on_mesh_gpu(
     rank = comm.Get_rank()
     size = comm.Get_size()
 
-    if rank == 0:
-        os.makedirs(cache_dir, exist_ok=True)
+    # Every rank creates the cache dir in its own filesystem view before os.chdir().
+    # A rank-0-only makedirs + Barrier can still race on Lustre across nodes: a dir
+    # freshly created on one node's client is not guaranteed visible to another node
+    # immediately after the barrier, which made os.chdir(cache_dir) fail intermittently.
+    # os.makedirs(exist_ok=True) is safe under concurrent creation of the same path.
+    os.makedirs(cache_dir, exist_ok=True)
     comm.Barrier()
 
     remaining_gps = []
@@ -540,6 +544,8 @@ def run_scattering(
     lang: str = "GPU",
     ir_index_start: Optional[int] = None,
     ir_index_stop: Optional[int] = None,
+    cache_dir: Optional[str] = None,
+    fc_cache_dir: Optional[str] = None,
 ) -> None:
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -549,12 +555,16 @@ def run_scattering(
     comm.Barrier()
 
     tag = mesh_tag(mesh_numbers)
-    fc_cache_dir = f"phonon_cache_{tag}"
+    # Cache dirs default to CWD-relative names (legacy behavior). Passing an explicit
+    # (ideally absolute) --fc-cache-dir / --cache-dir makes the run independent of the
+    # working directory — the engine still os.chdir()s into the gamma cache to write
+    # gamma_detail, but into the explicit path rather than a CWD-relative one.
+    fc_cache_dir = fc_cache_dir if fc_cache_dir else f"phonon_cache_{tag}"
     legacy_fc_cache_dir = "phonon_cache"
     # T-tag the phono3py cache directory so multiple temperatures never share
     # the same gamma_detail files (mirrors the already-correct T-tagged convention
     # used for reduced-gamma output).
-    ph3_cache_dir = (
+    ph3_cache_dir = cache_dir if cache_dir else (
         f"phono3py_cache_{mesh_numbers[0]}x{mesh_numbers[1]}x{mesh_numbers[2]}"
         f"_T{temperature:.1f}K"
     )
@@ -723,6 +733,23 @@ def _parse_args() -> argparse.Namespace:
         help="Primary backend language passed to run_imag_self_energy.",
     )
     parser.add_argument("--output", default=None, help="Output HDF5 filename for assembled W matrix.")
+    parser.add_argument(
+        "--cache-dir",
+        default=None,
+        help=(
+            "Explicit directory for the phono3py gamma_detail cache. If omitted, a "
+            "CWD-relative `phono3py_cache_<mesh>_T<..>K` is used (legacy behavior). "
+            "Pass an absolute path to make the run independent of the working directory."
+        ),
+    )
+    parser.add_argument(
+        "--fc-cache-dir",
+        default=None,
+        help=(
+            "Explicit directory for the mesh-tagged fc2/fc3 cache. If omitted, a "
+            "CWD-relative `phonon_cache_<mesh>` is used (legacy behavior)."
+        ),
+    )
 
     parser.add_argument(
         "--skip-assemble",
@@ -810,6 +837,8 @@ def main() -> None:
         lang=args.lang,
         ir_index_start=args.ir_index_start,
         ir_index_stop=args.ir_index_stop,
+        cache_dir=args.cache_dir,
+        fc_cache_dir=args.fc_cache_dir,
     )
 
 
