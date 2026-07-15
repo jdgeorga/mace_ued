@@ -19,7 +19,7 @@
 - **Env every shell:** `source /pscratch/sd/j/jdgeorga/ued/split_mlip_generators/load_mace_phonon_env.sh` (Python 3.12 + fork). Login-node `python` is 2.7. Never pipe the source (subshell loses it).
 - **Branch:** `split_mlip_phonon_lifetime`. **Local commits OK; never `git push` without explicit approval** (AGENTS.md).
 - **Package install:** editable (`pip install -e .`); new console scripts must be added to `setup.py` `entry_points`/`scripts` and re-installed.
-- **GPU stages** run only inside an allocation: `salloc -N 4 -C gpu --gpus-per-node=4 -A m2651_g -q interactive -t 60`; launch with `srun --overlap -n 4 --gpus-per-task=1` (**`-n 16` hangs**). Single-GPU steps: `srun --overlap -N1 -n1 --gpus-per-node=4`. Set `MPICH_GPU_SUPPORT_ENABLED=0` is NOT needed here (MACE uses torch-CUDA); the CuPy engine needs a GPU.
+- **GPU stages** run only inside an allocation: `salloc -N 4 -C gpu --gpus-per-node=4 -A m4480_g -q interactive -t 240 --job-name sd_dfpt_linewidth` (grab with `--no-shell`, then `srun --jobid=<id>`); launch with `srun --overlap -n 4 --gpus-per-task=1` (**`-n 16` hangs**). Nodes have 64 CPUs each — use them for the CPU/force/matdyn stages, then the 4 GPUs/node for scatter. Single-GPU steps: `srun --overlap -N1 -n1 --gpus-per-node=4`. Set `MPICH_GPU_SUPPORT_ENABLED=0` is NOT needed here (MACE uses torch-CUDA); the CuPy engine needs a GPU.
 - **Never run codex/grok with Bash `run_in_background`.** For gpt-5.6 in the implementation workflow use the wrappers (codex-implement/review) or run codex detached+poll from the main loop.
 - **Do not change existing all-MLIP default behavior:** every new capability is flag-gated and defaults OFF; the bilayer golden (γ_max 0.020164 THz) must stay reproducible.
 - **Units/conventions (verbatim):** τ = 1/(4π·γ); interpolate γ never τ; QE post-ZASR Born/ε from `ifc.q2r.xml` (not the Γ dyn XML); α_ewald = 0.98211261577626741; BvK supercell = 6×6×1; matdyn/q2r `asr='crystal'`/`zasr='crystal'`; leave phonopy `symmetrize_fc2` **OFF** for DFPT fc2.
@@ -463,3 +463,92 @@ def test_phase2_matches_phase1(bilayer_yaml, dfpt_fc2_npy, nac_2d_npz, dfpt_mode
 - Read DFPT (structure/no-relax/fc2/NAC) → **T1,T2**. Residual subtraction toggle → **T6**. Split-MLIP FC3 @ DFPT geom → **T6+existing forces3**. DFPT harmonic Phase 1 (matdyn+inject+gauge) → **T3,T4,T5,T7**. loto on/off axis → **T5** (matdyn flag) + **T13** (Phase-2). FC2-source dfpt / no double-ASR → **T7**. Figures (γ/τ colored dispersion, both pipelines) → **T8**. Variant matrix / ablation (V1/V2loto/V2noloto/V3 × residual) → **T9,T10**. Validation gates (phband.freq, overlap, D3-trap, atom-order, units, γ≥0/τ>0) → **T1,T3,T9,T10**. Phase-2 fork-native loto_2d → **T11,T12,T13**. Science caveat (D3-in-fc2 not in MLIP-FC3) → documented in spec §7 (no task; methods note). **No gaps.**
 - Placeholder scan: none (`TODO`/`TBD`-free; every step has test/impl content or a precise companion-doc `file:line` reference).
 - Type consistency: `read_dfpt`→`DfptData(fc2, nac, supercell_matrix, structure)`; `matdyn_modes`→npz `{frequencies,eigenvectors,grid_address,mesh}` consumed verbatim by `set_phonon_data` (T7) and Phase-2 gate (T13); `apply_bloch_gauge(...,sign)` reused in T5/T11; `subtract_reference_forces(F,F0)` in T6. Consistent.
+
+---
+
+## Understand-phase corrections (VERIFIED LIVE — these OVERRIDE the task text above)
+
+Confirmed against phonopy 4.3.1 / phono3py 4.3.4.dev7 (fork) on 2026-07-15. Where this
+section conflicts with a task above, **this section wins**.
+
+**C1 — `PH_Q2R` cannot read `ifc.q2r.xml` (Task 1).** `PH_Q2R._parse_q2r` is a plain-text
+readline parser; the file is XML → verified crash (`invalid literal for int(): '<?xml'`).
+There is no text `.fc` companion in `collect/`. **Parse the XML directly** (`xml.etree.ElementTree`):
+fc blocks are tags `<s_s1_m1_m2_m3.s.s1.m1.m2.m3>` with an `<IFC>` 3×3 child; `s,s1∈1..6`,
+`(m1,m2,m3)∈1..(6,6,1)`; block = Φ between atom `s` in cell 0 and atom `s1` in cell
+`R=(m1-1,m2-1,m3-1)`, units **Ry/au²**. Fill phonopy's compact layout exactly as
+`qe.py:_parse_fc` does (index transpose `fc[j, i*ndim+i_dim, ll, k]`), then reuse
+`PH_Q2R._get_q2r_positions(cell)` + `_get_site_mapping(scell.scaled_positions, q2r_spos, scell.cell)`
++ `fc[pcell.p2s_map,:]=q2r_fc[:,site_map]` + `distribute_force_constants_by_translations` →
+`(N,N,3,3)`, N=216. (`_get_site_mapping` already enforces the plan's atom-order assertion.)
+Read the QE primitive cell via `read_pwscf` on `../out_scf` (or the XML `<AT>`/`<ATOM TAU>` header;
+identify species by `<MASS.*>`, NOT `<TYPE_NAME.*>` which are unreliable). NAC arrays
+(`<EPSILON>`, `<ZSTAR>/<Z_AT_.n>`, `<alpha_ewald>`, `<UNIT_CELL_VOLUME_AU>`, `<MESH_NQ1_NQ2_NQ3>`,
+`<AT>`+alat) are all in `ifc.q2r.xml` as the plan assumes (post-ZASR Born; `born[0,0,0]=-1.77642705`).
+
+**C2 — `set_phonon_data` contract (Tasks 3, 5, 7).** Signature
+`Phono3py.set_phonon_data(frequencies, eigenvectors, grid_address)` — requires
+`init_phph_interaction()` to have run first (else silent no-op). Shapes:
+`frequencies (num_grid, nband) float64` THz; `eigenvectors (num_grid, nband, nband) complex128`
+with **mode = column** (row index = atom*3+cart); `grid_address` **must equal `ph3.grid.addresses`**
+(the full BZ grid). So the stored npz `eigenvectors (Ngrid, nb, nat, 3)` must be
+`reshape(Ngrid, nb, nat*3).transpose(0,2,1)` before injection. Task 7 Step-1 test: pass the
+reshaped array; replace the malformed `grg2bzg[:len]` assertion with
+`np.allclose(itr.get_phonons()[0], z['frequencies'])` (both already full-BZ order);
+`itr.get_phonons()[2]` is `phonon_done` (all 1 after injection).
+
+**C3 — Injection order & overwrite safety (Task 7).** Call `init_phph_interaction(nac_q_direction=None)`
+FIRST, then `set_phonon_data`. Overwrite is auto-prevented: both C (`c/phonon.c:162`) and Rust
+(`solver.py:208`) solvers skip `phonon_done==1` points, so a later `run_phonon_solver()` is a
+no-op over injected points. The ONLY overwrite risk is Γ under `is_nac=True` — avoided by keeping
+`nac_q_direction=None`. (Still safe to also skip the explicit `run_phonon_solver()` block at
+gpu_scattering line 604-607, but not required.)
+
+**C4 — matdyn.modes is ALREADY mass-weighted (Task 3 Step 4 is wrong).** matdyn writes
+`z·√(amu_ry·M)` which reconstructs phonopy's unit-norm mass-weighted eigenvector `w` exactly —
+there is **NO √M to undo**. Do only: (a) per-mode renormalize to unit norm, (b) reshape/transpose
+to `(gp, nat*3, mode)`, (c) atom-dependent Bloch gauge `exp(±2πi q·τ_κ)` (Task 4). Parse the
+`[THz]` column directly (ordinary ν, matches phono3py); use `[cm⁻¹]` only for the phband gate.
+Set the phono3py primitive-cell masses explicitly to the QE values (Mo 95.95, W 183.84, Se 78.971).
+
+**C5 — Full BZ grid is much larger than prod(mesh) (Task 3).** For this anisotropic slab,
+`ph3.grid.addresses` has **443 pts at 12×12×1** and **3979 at 36×36×1** (q_z=±1 boundary images
+because the reciprocal c-axis is short). The matdyn q-list AND the injected arrays must have length
+`len(ph3.grid.addresses)`, enumerated in that order; `q_crystal = grid.addresses @ grid.QDinv.T`.
+
+**C6 — QE fc2 units when diagonalized (Tasks 8, 11).** The XML fc2 is **Ry/au²**. Harmless for
+Phase-1 injection (not diagonalized). But `compare_dispersion` (T8) and the Phase-2 native matrix
+(T11) DO diagonalize → use `frequency_factor_to_THz = 108.97077184367376` (QE) or convert fc2 to
+eV/Å², NOT the default VaspToTHz 15.6333.
+
+**C7 — Residual F0 needs no MPI broadcast (Task 6).** `np.save` is rank-0-only (forces3.py:57);
+compute F0 on rank 0 and subtract there. Build the undisplaced cell from `ph3.supercell` /
+`ph3.phonon_supercell` via `phonopy_io.phonopy_atoms_to_ase(..., include_masses=False)` +
+`copy_repeated_arrays(relaxed_atoms, ..., ("atom_types","layer_ids"))` (same transform as
+forces3.py:104-112). Add `--subtract-reference-forces` in `_parse_phono3py_force_args` (scopes to
+the two phono3py mains only).
+
+**C8 — DFPT-fc2 edit is in the shared helper, not fc_cache.py (Task 7).**
+`ph3.produce_fc2(symmetrize_fc2=True)` / `np.save(fc2_mesh,...)` are in
+`gpu_scattering_W_phonons_bilayer_comm_mesh.py:265-267` inside
+`set_phono3py_forces_with_mesh_fc_cache` (signature line 219, `need_compute` block 259-268). Thread
+a `dfpt_fc2: Optional[str]=None` kwarg through it; when set, still `produce_fc3(symmetrize_fc3r=True)`
+but replace 265/267 with `ph3.fc2 = np.load(dfpt_fc2)` (NO symmetrize) → save to `fc2_mesh`. Add
+`--fc2-source {mlip,dfpt}` + `--dfpt-fc2` in `fc_cache.py:parse_args`; default None preserves both
+callers (`fc_cache.main` and `run_scattering`).
+
+**C9 — setup.py entry points must be fully-qualified (Tasks 2, 5, 8):**
+`mlip-linewidth-read-dfpt = mlip_phonon_scattering.linewidth.dfpt_read:main` (and
+`...matdyn_modes:main`, `...compare_dispersion:main`) — NOT `linewidth.<mod>:main`.
+
+**C10 — No `need()` guard exists (Task 9).** Example scripts are linear numbered steps with
+`multi_rank(){ srun --overlap -n "$MPI_RANKS" --gpus-per-task=1 "$@"; }` and
+`single_rank(){ srun --overlap -N1 -n1 --gpus-per-node=4 "$@"; }` (run_linewidth.sh:36-37). Model
+run_dfpt_linewidth.sh on that (no `need()`); reuse the `INTERLAYER_ARGS` array (line 24).
+
+**C11 — figure reuse (Task 8).** `_render_two_panel(name,cfg,x_skel,freqs_skel,hs_x,Xp,Yp,Gp,suffix,...)`
+(linewidth_path.py:359) reads `cfg['label']` and, only when `out_dirs is None`, `cfg['root']` — pass
+`out_dirs` explicitly + a `cfg` with a `'label'` key. Reuse `compute_band_structure` (76),
+`gamma_on_path` (203), `lifetime_from_gamma` (284), `mesh_frequencies` (97).
+
+C1–C11 above are the consolidated, actionable corrections; implement to them verbatim.
