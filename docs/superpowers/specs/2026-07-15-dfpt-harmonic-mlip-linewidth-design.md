@@ -46,21 +46,25 @@ differences are **geometry**, **harmonic FC2 source**, and **residual subtractio
 | Variant | Geometry | Harmonic FC2 (freqs+eigvecs) | FC3 | NAC | Residual |
 |---|---|---|---|---|---|
 | **V1 `mlip_strict`** (reference; exists) | MLIP-relaxed | MLIP (forces2-from-3, 6×6×1) | MLIP 3×3×1 | none | n/a (relaxed → F≈0) |
-| **V2 `dfpt_harm`** (headline new) | DFPT (read, no relax) | **DFPT loto_2d** (injected → then fork-native) | MLIP 3×3×1 @ DFPT geom | 2D-LOTO | toggle {on, off} |
+| **V2 `dfpt_harm`** (headline new) | DFPT (read, no relax) | **DFPT** (injected → then fork-native) | MLIP 3×3×1 @ DFPT geom | **2D-LOTO {on, off}** | toggle {on, off} |
 | **V3 `mlip_at_dfpt`** (ablation) | DFPT (read, no relax) | MLIP (forces2-from-3 @ DFPT geom) | MLIP 3×3×1 @ DFPT geom | none | toggle {on, off} |
 
 **Comparisons the matrix isolates:**
 - **V2 vs V1** — headline: DFPT-harmonic hybrid vs fully-MLIP.
 - **V3 vs V1** — geometry effect (both MLIP FC2; DFPT vs MLIP-relaxed geometry).
 - **V2 vs V3** — **FC2-source effect** (identical DFPT geometry + identical MLIP FC3;
-  DFPT-loto_2d FC2 vs MLIP FC2) — the clean isolation of "does the DFPT harmonic matter."
+  DFPT FC2 vs MLIP FC2) — the clean isolation of "does the DFPT harmonic matter."
+- **V2 loto_2D on vs off** — **2D-LOTO electrostatics effect** on γ/τ (DFPT short-range
+  harmonic with vs without the 2D non-analytic term). loto_2D bites only V2; V1/V3 have
+  no Born charges and are loto-invariant, so the axis is not duplicated onto them.
 - **residual on vs off** within V2/V3 — effect of the reference-force correction.
 
 Because V2 and V3 share geometry, FC3, and residual setting, **the MLIP FC3 is computed
 once per (residual setting) and reused across V2/V3**; V2 and V3 differ only in the FC2
-handed to phono3py.
+handed to phono3py. The V2 loto/noloto pair likewise shares geometry and FC3, differing
+only in the DFPT harmonic (2D-LOTO on/off).
 
-Runs to produce: V1, V2{on,off}, V3{on,off} = 5 linewidth runs.
+Runs to produce: V1, V2-loto{on,off}, V2-noloto{on,off}, V3{on,off} = **7** linewidth runs.
 
 ## 4. Architecture — how it plugs into the existing pipeline
 
@@ -74,11 +78,11 @@ New / modified stages:
 | Stage | Command | New? | Behavior |
 |---|---|---|---|
 | Read DFPT | `mlip-linewidth-read-dfpt` | **new** | Point at the DFPT dir → emit `dfpt_structure.xyz` (with `atom_types`/`layer_ids`), `dfpt_fc2.npy` (via phonopy `PH_Q2R`), `nac_2d.npz` (ε∞, Born, α, cell/area/c, periodic axes). Run the D3-trap + Γ-acoustic gates. |
-| Harmonic (Phase 1) | `mlip-linewidth-matdyn-modes` | **new** | Generate a matdyn input over phono3py's exact 36×36×1 BZ grid addresses; run QE `matdyn` (loto_2d); parse freqs + eigenvectors → `dfpt_modes.npz`. |
+| Harmonic (Phase 1) | `mlip-linewidth-matdyn-modes` | **new** | Generate a matdyn input over phono3py's exact 36×36×1 BZ grid addresses; run QE `matdyn` with `--loto-2d {on,off}`; parse freqs + eigenvectors → `dfpt_modes_loto.npz` / `dfpt_modes_noloto.npz`. |
 | Displacements | `mlip-linewidth-phono3py-yaml` | reuse | On `dfpt_structure.xyz`, supercells 3×3×1 (fc3) / 6×6×1 (fc2). |
 | Forces (FC3) | `mlip-linewidth-forces3` | **modified** | Add `--subtract-reference-forces` (default on in DFPT mode): compute F_MLIP on the undisplaced supercell once, subtract from every displaced set. |
 | Cache FC | `mlip-linewidth-cache-fc` | **modified** | `--fc2-source {mlip,dfpt}`; when `dfpt`, use `dfpt_fc2.npy` as fc2 and **do not** call `symmetrize_fc2`. |
-| Scatter | `mlip-linewidth-scatter-gpu` | **modified** | `--injected-modes dfpt_modes.npz` (Phase 1) → `set_phonon_data` after `init_phph_interaction`; or `--nac-2d nac_2d.npz` (Phase 2) → fork-native `DynamicalMatrixQELoto2D`. Both default off (preserve golden). |
+| Scatter | `mlip-linewidth-scatter-gpu` | **modified** | `--injected-modes <dfpt_modes_{loto,noloto}.npz>` (Phase 1) → `set_phonon_data` after `init_phph_interaction`; or Phase 2 fork-native `DynamicalMatrixQELoto2D` with `--nac-2d nac_2d.npz` (loto on) / plain fc2 (noloto). Both default off (preserve golden). |
 | Extract γ | `mlip-linewidth-extract-gamma` | reuse | unchanged. |
 | Compare figs | `mlip-linewidth-compare` | **new** | Dispersion colored by γ and by τ, all variants (§8). |
 
@@ -122,7 +126,11 @@ q→0 correction (symptom: Γ flexural mode at −12 cm⁻¹). Two phases, per u
 - Full math, file:line refs, and the on-site subtraction / G-sum cutoff are in the
   companion **`docs/loto2d_implementation_plan.md`** (Sol/gpt-5.6-sol, xhigh).
 
-The Phase-1 injected 36×36×1 dataset is the **regression gold standard** for Phase 2.
+**loto_2D {on, off}:** Phase 1 flips matdyn `loto_2d` (→ `dfpt_modes_loto.npz` /
+`dfpt_modes_noloto.npz`); Phase 2 includes / omits the `D_QE_loto2d` term. `noloto` is the
+DFPT short-range harmonic without the 2D non-analytic tail — the V2-noloto ablation.
+
+The Phase-1 injected 36×36×1 dataset (loto on) is the **regression gold standard** for Phase 2.
 
 ## 6. Residual-force subtraction (toggle)
 
@@ -176,10 +184,11 @@ joint-(q,ω) interpolation. **Project rule: interpolate γ, never τ** (τ=1/γ 
 - **Fig 1 — linewidth:** ω(q) along Γ–M–K–Γ as a colormapped scatter/line, colored by γ
   (THz), panels for the compared variants side-by-side with a **shared colorbar**.
 - **Fig 2 — lifetime:** same layout, colored by τ = 1/(4πγ) (ps).
-- **Primary comparison panels:** V1 `mlip_strict` | V2 `dfpt_harm` (residual-on) |
-  V3 `mlip_at_dfpt` (residual-on). **Supplementary:** residual on/off for V2 (and V3).
+- **Primary comparison panels:** V1 `mlip_strict` | V2 `dfpt_harm` loto-on (residual-on) |
+  V2 `dfpt_harm` loto-off (residual-on) | V3 `mlip_at_dfpt` (residual-on).
+  **Supplementary:** residual on/off for V2/V3.
 - Plus a CSV/text `Δ` summary: top-optical γ, τ at K and M for each variant + the
-  pairwise ratios (V2/V1, V3/V1, V2/V3).
+  pairwise ratios (V2/V1, V3/V1, V2/V3, V2-loto/V2-noloto).
 
 ## 9. Test plan
 
