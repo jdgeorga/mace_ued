@@ -552,3 +552,46 @@ run_dfpt_linewidth.sh on that (no `need()`); reuse the `INTERLAYER_ARGS` array (
 `gamma_on_path` (203), `lifetime_from_gamma` (284), `mesh_frequencies` (97).
 
 C1–C11 above are the consolidated, actionable corrections; implement to them verbatim.
+
+---
+
+## Review findings R1–R7 (gpt-5.6-sol, 2026-07-15) — MUST-FIX before committing Phase-1
+
+Sol reviewed the T1/T3/T4/T6 diff and found 5 P1 + 2 P2 defects the unit tests missed. Fix all:
+
+- **R1 [P1] fc2 index convention (dfpt_read.py ~267-269).** QE `io_dyn_mat.f90:write_ifc`
+  writes `phid(nn,:,:,s,s1)`; phonopy `PH_Q2R._parse_fc` stores `fc[s1, s*ndim+i_dim, ll, k]`.
+  Current code uses `s` as row atom, `s1` as translated, and does NOT transpose the 3×3 block →
+  silently wrong. **Fix:** assign `q2r_fc[s1-1, (s-1)*ndim+i_dim] = block.T`. (Unit tests can't
+  catch this; the phband.freq dispersion gate in the compute phase is the definitive check.)
+- **R2 [P1] Remove the ASR hack (dfpt_read.py ~277-281).** `q2r zasr='crystal'` (do_q2r.f90 →
+  `set_zasr`) ASR's only the Born charges; the FC-ASR is applied by `matdyn asr='crystal'`
+  (matdyn.f90 → `set_asr`, an iterative translational+symmetry projection) at diagonalization.
+  Delete the uniform row-mean subtraction; **store raw IFCs**. Change the row-sum test that
+  enshrined it (assert the realistic raw residual, or drop it). Phase-2 applies a faithful
+  `set_asr('crystal')`-equivalent to a working copy at dyn-matrix build time (not baked in).
+- **R3 [P1] Convert cell bohr→Å for the structure (dfpt_read.py ~287-289).** phonopy `read_pwscf`
+  returns lengths in **bohr** even for `angstrom` input; `phonopy_atoms_to_ase` treats them as Å →
+  cell 6.227 Å × 75.6 Å instead of 3.295 Å × 40 Å (1.889× too big) → corrupts ALL MLIP FC3 forces
+  (Phase-1 too). **Fix:** keep the bohr cell for the q2r site-mapping, but multiply cell+positions
+  by Bohr→Å (0.529177210903) when building `DfptData.structure`. **Add a test** asserting in-plane
+  a ≈ 3.295 Å and out-of-plane c ≈ 40 Å.
+- **R4 [P1] Keep one unit system (dfpt_read.py ~275-276).** Do NOT convert fc2 to eV/Å² while NAC
+  stays in QE a.u. **Decision: keep fc2 raw Ry/bohr²**; document `nac['area']` as bohr², `nac['c']`
+  as the out-of-plane repeat in bohr (rename/comment so it's not read as "speed of light"); Phase-2
+  uses the QE THz factor 108.97077184367376 (not 15.6333).
+- **R5 [P1] Gauge transform must be fully returned+applied (gauge.py ~201-204).** `select_gauge`
+  may win by conjugation but returns only `sign` → not reproducible; its `qflip` only negates the
+  phase, not the e_qe(q)→e at −q grid permutation. **Fix:** return a complete transform descriptor
+  (sign, conjugation, and a real −q grid permutation) and an `apply_selected_gauge(...)` that
+  reproduces it; select via reconstructed-dyn-matrix residual or degenerate-subspace overlap, not
+  fixed-index per-mode overlaps.
+- **R6 [P2] Fix matdyn test self-comparison (test_matdyn_modes.py ~47-52).** `frequencies_cm` and
+  `ref` both load the same `phband.freq` → trivially zero. Compare the parsed `[THz]`→cm⁻¹ (or the
+  `.modes` cm⁻¹ field) against the independent `phband.freq`.
+- **R7 [P2] Per-stage reference-force filename (forces3.py ~84-85).** Both mains hardcode
+  `reference_forces.npy`; the FC2-from-3 stage overwrites the FC3 one. Derive the name from the
+  `--output` stem (e.g. `<stem>_reference_forces.npy`).
+
+Also: register the `slow`/`gpu` pytest markers (pyproject/pytest.ini) to clear the warnings.
+Note: `dfpt_fc2.npy` (R1/R2/R4) is Phase-2-critical; the DFPT **structure** (R3) is Phase-1-critical.
