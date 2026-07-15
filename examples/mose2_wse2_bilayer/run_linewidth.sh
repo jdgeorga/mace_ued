@@ -37,7 +37,14 @@ multi_rank() { srun --overlap -n "$MPI_RANKS" --gpus-per-task=1 "$@"; }
 single_rank() { srun --overlap -N1 -n1 --gpus-per-node=4 "$@"; }
 
 mkdir -p "$OUTPUT_DIR"
-echo "=== MoSe2/WSe2 bilayer: MPI_RANKS=$MPI_RANKS, output=$OUTPUT_DIR ==="
+# The GPU scatter engine derives its FC/gamma cache dirs (phonon_cache_*, phono3py_cache_*)
+# RELATIVE to the current working directory and os.chdir()s into the gamma cache on every
+# rank. Run from $OUTPUT_DIR so those relative caches coincide with the absolute paths steps
+# 4/6 use, and pre-create the gamma cache so a rank on another node never races the rank-0
+# mkdir (see the CWD==OUTPUT_DIR note in ../../../../SPLIT_MLIP_NOTES.md).
+mkdir -p "$GAMMA_CACHE"
+cd "$OUTPUT_DIR"
+echo "=== MoSe2/WSe2 bilayer: MPI_RANKS=$MPI_RANKS, output=$OUTPUT_DIR (cwd=$PWD) ==="
 echo "=== [1] relax ==="
 single_rank mlip-linewidth-relax "$INPUT" "$OUTPUT_DIR/$PREFIX" "${INTERLAYER_ARGS[@]}" --fmax 1.3e-5 --steps 1000 --maxstep 0.05 --device cuda
 echo "=== [2a] phonopy displacements (6 6 1) ==="
