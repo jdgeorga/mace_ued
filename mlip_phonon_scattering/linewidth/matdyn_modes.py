@@ -295,6 +295,19 @@ def main(argv=None):
     for iq, q in enumerate(q_cryst):
         freq_ph[iq], e_ph[iq] = frequencies_and_eigenvectors_at_q(dm, q)
 
+    # NOTE on reference quality: ``dm`` above intentionally omits NAC (it is a
+    # plain short-range fc2 dynamical matrix; correct 2D-LOTO support is a
+    # later, not-yet-built task). For this heterobilayer, empirically the
+    # lowest (acoustic + interlayer shear/breathing) modes ARE meaningfully
+    # NAC-sensitive even away from Gamma (2D LOTO's non-analytic term decays
+    # algebraically in q, unlike the exponentially-localized 3D case), so
+    # ``residual`` from a real bilayer will legitimately be large (poor
+    # magnitude-of-overlap) even though the DISCRETE sign/conjugate/qflip
+    # choice select_gauge lands on still matches the independently validated
+    # phonopy<->QE convention documented in
+    # docs/phonopy_eigenvector_gauge.md (phonopy->QE is ``sign=+1``, so
+    # QE->phonopy here is ``sign=-1``). Do not over-interpret ``residual`` as
+    # a quality gate for this reference; it is diagnostic only.
     transform, residual, qflip_perm = select_gauge(
         e_ph, e_qe, q_cryst, structure.get_scaled_positions(), freqs=freq_ph
     )

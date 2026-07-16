@@ -78,7 +78,25 @@ def test_matdyn_run_phband_acceptance_gate(tmp_path):
 
 
 @pytest.mark.slow
-def test_matdyn_modes_cli_gauge_path(tmp_path, monkeypatch):
+def test_matdyn_modes_cli_gauge_path(tmp_path, monkeypatch, capsys):
+    """Exercise the parse+gauge path with no matdyn.x call.
+
+    This does NOT assert a tight gauge ``residual``: the reference dynamical
+    matrix here is a plain (no-NAC) fc2 diagonalization, and this real
+    heterobilayer's low bands are genuinely 2D-LOTO-sensitive even away from
+    Gamma (confirmed empirically: atom order, Cartesian-axis order, ASR
+    method, lattice orientation, and q-sign convention were each
+    independently ruled out as the cause of the large residual; the
+    discrepancy tracks
+    `loto_2d=.true.` in the real DFPT fixture, i.e. missing NAC in the
+    reference, which is out of scope until the Task-11 fork-native 2D-LOTO
+    kernel exists). Instead this anchors on the DISCRETE sign choice, which
+    matches the independently validated phonopy<->QE convention documented in
+    docs/phonopy_eigenvector_gauge.md (phonopy->QE is sign=+1, so this
+    QE->phonopy direction must be sign=-1) -- a real regression guard against
+    a convention flip, without over-claiming reference quality it can't
+    deliver for this system.
+    """
     from mlip_phonon_scattering.linewidth.dfpt_read import main as dfpt_main
 
     dfpt_main(
@@ -140,3 +158,6 @@ def test_matdyn_modes_cli_gauge_path(tmp_path, monkeypatch):
     assert saved["frequencies"].shape == (len(real_q), 18)
     assert saved["eigenvectors"].shape == (len(real_q), 18, 6, 3)
     assert saved["mesh"].tolist() == [12, 12, 1]
+
+    printed = capsys.readouterr().out
+    assert "gauge transform: GaugeTransform(sign=-1" in printed
