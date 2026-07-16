@@ -1,17 +1,13 @@
 #!/usr/bin/env python3
-"""Compute MACE energies and forces for phonopy displacement supercells."""
+"""Compute QE energies and forces for phonopy displacement supercells."""
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
-from mlip_phonon_scattering.calculator import (
-    add_interlayer_arguments,
-    add_mace_arguments,
-    config_from_args,
-)
-from mlip_phonon_scattering.forces import compute_displacement_forces
+from mlip_phonon_scattering.qe_calculator import add_qe_arguments, qe_config_from_args
+from mlip_phonon_scattering.qe_forces import compute_displacement_forces_qe
 
 
 def parse_args() -> argparse.Namespace:
@@ -20,19 +16,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("phonopy_yaml", help="Phonopy displacement YAML.")
     parser.add_argument("--forces-output", default="forces.npy", help="Output NumPy force array.")
     parser.add_argument("--energies-output", default="energies.npy", help="Output NumPy energy array.")
-    add_mace_arguments(parser)
-    add_interlayer_arguments(parser)
+    add_qe_arguments(parser)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    compute_displacement_forces(
+    compute_displacement_forces_qe(
         relaxed_file=Path(args.relaxed_file).resolve(),
         phonopy_yaml=Path(args.phonopy_yaml).resolve(),
         forces_output=Path(args.forces_output).resolve(),
         energies_output=Path(args.energies_output).resolve(),
-        calculator_config=config_from_args(args),
+        config=qe_config_from_args(args),
     )
 
 

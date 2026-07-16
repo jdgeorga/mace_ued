@@ -1,11 +1,5 @@
-example_archive/
-
+*.egg-info/
 __pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-.DS_Store
-*.log
-slurm-*.out
+*.pyc
+build/
+dist/
