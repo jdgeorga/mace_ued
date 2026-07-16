@@ -42,12 +42,19 @@ if [ "${#MESH_ARGS[@]}" -ne 3 ]; then
 fi
 
 mkdir -p "$OUTPUT_DIR/bin"
+MATDYN_BIN="${MATDYN_BIN:-$(
+    if [ -x /pscratch/sd/j/jdgeorga/ued/q-e-epw-tdbe-speedup/bin/matdyn.x ]; then
+        printf '%s' /pscratch/sd/j/jdgeorga/ued/q-e-epw-tdbe-speedup/bin/matdyn.x
+    else
+        command -v matdyn.x
+    fi
+)}"
 MATDYN_SHIM="$OUTPUT_DIR/bin/matdyn.x"
 printf '%s\n' \
     '#!/usr/bin/env bash' \
     '# srun shim for the validated speedup matdyn.x; OMP=1 avoids the 2D-LOTO race.' \
     'export OMP_NUM_THREADS=1' \
-    "exec srun --jobid=$ALLOC_JOBID --overlap -N1 -n8 -c2 --cpu-bind=cores /pscratch/sd/j/jdgeorga/ued/q-e-epw-tdbe-speedup/bin/matdyn.x \"\$@\"" \
+    "exec srun --jobid=$ALLOC_JOBID --overlap -N1 -n8 -c2 --cpu-bind=cores $MATDYN_BIN \"\$@\"" \
     > "$MATDYN_SHIM"
 chmod +x "$MATDYN_SHIM"
 export PATH="$OUTPUT_DIR/bin:$PATH"
@@ -168,10 +175,10 @@ if [ -f "$OUTPUT_DIR/figures_full/comparison_summary.csv" ]; then
 else
     mlip-linewidth-compare --mesh "${MESH_ARGS[@]}" --temperature "$TEMP" --out-dir "$OUTPUT_DIR/figures_full" --variants \
         "mlip_strict=$V1_YAML,$V1_FC2,$V1_GAMMA_NPZ,ev" \
-        "dfpt_loto_res=$P3,$FC2_DFPT,$OUTPUT_DIR/gamma_V2_loto_res.npz,ry" \
-        "dfpt_loto_nores=$P3,$FC2_DFPT,$OUTPUT_DIR/gamma_V2_loto_nores.npz,ry" \
-        "dfpt_noloto_res=$P3,$FC2_DFPT,$OUTPUT_DIR/gamma_V2_noloto_res.npz,ry" \
-        "dfpt_noloto_nores=$P3,$FC2_DFPT,$OUTPUT_DIR/gamma_V2_noloto_nores.npz,ry" \
+        "dfpt_loto_res=$P3,$FC2_DFPT,$OUTPUT_DIR/gamma_V2_loto_res.npz,ry,$MODES_LOTO" \
+        "dfpt_loto_nores=$P3,$FC2_DFPT,$OUTPUT_DIR/gamma_V2_loto_nores.npz,ry,$MODES_LOTO" \
+        "dfpt_noloto_res=$P3,$FC2_DFPT,$OUTPUT_DIR/gamma_V2_noloto_res.npz,ry,$MODES_NOLOTO" \
+        "dfpt_noloto_nores=$P3,$FC2_DFPT,$OUTPUT_DIR/gamma_V2_noloto_nores.npz,ry,$MODES_NOLOTO" \
         "mlip_at_dfpt_res=$P3,$FC_V3_RES/fc2.npy,$OUTPUT_DIR/gamma_V3_res.npz,ev" \
         "mlip_at_dfpt_nores=$P3,$FC_V3_NORES/fc2.npy,$OUTPUT_DIR/gamma_V3_nores.npz,ev"
 fi

@@ -12,6 +12,8 @@ import csv
 import numpy as np
 import pytest
 
+import mlip_phonon_scattering.linewidth.compare_dispersion as compare_dispersion
+
 from mlip_phonon_scattering.linewidth.compare_dispersion import (
     VariantDispersion,
     _compare_core,
@@ -96,6 +98,80 @@ def test_summary_derives_tau_from_gamma(tmp_path):
     assert np.isclose(float(rows[("v", "K")]["gamma_THz"]), gK)
     assert np.isclose(float(rows[("v", "K")]["tau_ps"]), 1.0 / (4.0 * np.pi * gK), rtol=1e-4)
     assert np.isclose(float(rows[("v", "M")]["tau_ps"]), 1.0 / (4.0 * np.pi * gM), rtol=1e-4)
+
+
+def test_prepare_variant_uses_injected_mesh_frequencies(tmp_path, monkeypatch):
+    """Injected matdyn frequencies are reordered onto gamma's q-mesh, not recomputed."""
+    import phono3py
+    from phonopy.structure.atoms import PhonopyAtoms
+
+    cell = PhonopyAtoms(
+        symbols=["Si"], cell=np.diag([5.0, 5.0, 18.0]), scaled_positions=[[0.0, 0.0, 0.0]]
+    )
+    ph3 = phono3py.Phono3py(cell, supercell_matrix=[1, 1, 1], log_level=0)
+    yaml = tmp_path / "toy.yaml"
+    ph3.save(filename=str(yaml))
+    mesh = [2, 2, 1]
+    loaded = phono3py.load(str(yaml), log_level=0)
+    loaded.mesh_numbers = mesh
+    addresses = np.asarray(loaded.grid.addresses, dtype=np.int64)
+    q_full = np.mod(np.dot(addresses, loaded.grid.QDinv), 1.0)
+    keep, seen = [], set()
+    for index, key in enumerate(np.rint(q_full * 10**8).astype(np.int64)):
+        frozen = tuple(key)
+        if frozen not in seen:
+            seen.add(frozen)
+            keep.append(index)
+    q_mesh = q_full[keep]
+    nb = 3
+    expected_freq = np.arange(len(addresses) * nb, dtype=float).reshape(len(addresses), nb)
+    expected_freq_on_gamma_mesh = expected_freq[keep]
+    reverse = np.arange(len(addresses) - 1, -1, -1)
+    injected = tmp_path / "injected_modes.npz"
+    np.savez(
+        injected,
+        frequencies=expected_freq[reverse],
+        eigenvectors=np.zeros((len(addresses), nb, 1, 3), dtype=np.complex128),
+        grid_address=addresses[reverse],
+        mesh=np.asarray(mesh),
+    )
+
+    monkeypatch.setattr(
+        compare_dispersion,
+        "compute_band_structure",
+        lambda *_args, **_kwargs: (
+            np.zeros((1, 3)), np.ones((1, nb)), np.array([0.0]), [0.0, 0.0, 0.0, 0.0], np.eye(3)
+        ),
+    )
+    monkeypatch.setattr(
+        compare_dispersion,
+        "_load_mesh_gamma",
+        lambda _path: (q_mesh, np.zeros((len(q_mesh), nb))),
+    )
+    monkeypatch.setattr(
+        compare_dispersion,
+        "mesh_frequencies",
+        lambda *_args, **_kwargs: pytest.fail("raw-fc2 mesh frequencies must not be used"),
+    )
+    captured = {}
+
+    def fake_gamma_on_path(_qpath, freqs_path, _reclat, _qmesh, freq_mesh, _gamma, _mesh):
+        captured["freq_mesh"] = freq_mesh.copy()
+        return np.zeros_like(freqs_path), None
+
+    monkeypatch.setattr(compare_dispersion, "gamma_on_path", fake_gamma_on_path)
+    compare_dispersion._prepare_variant(
+        dict(
+            label="injected",
+            phono3py_yaml=str(yaml),
+            fc2_path="unused.npy",
+            gamma_npz="unused_gamma.npz",
+            injected_modes=str(injected),
+        ),
+        mesh,
+        npoints=5,
+    )
+    assert np.array_equal(captured["freq_mesh"], expected_freq_on_gamma_mesh)
 
 
 # ---------------------------------------------------------------------------

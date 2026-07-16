@@ -114,7 +114,7 @@ def _factor_for(spec: dict) -> float:
 
 
 def _normalize_variant(variant) -> dict:
-    """Coerce a dict or ``(label, yaml, fc2, gamma[, units])`` tuple to a canonical dict."""
+    """Coerce a dict or ``(label, yaml, fc2, gamma[, units[, modes]])`` tuple."""
     if isinstance(variant, (tuple, list)):
         if len(variant) < 4:
             raise ValueError(
@@ -128,6 +128,8 @@ def _normalize_variant(variant) -> dict:
         )
         if len(variant) > 4 and variant[4]:
             spec["fc2_units"] = variant[4]
+        if len(variant) > 5 and variant[5]:
+            spec["injected_modes"] = variant[5]
     elif isinstance(variant, dict):
         spec = dict(variant)
     else:
@@ -147,6 +149,11 @@ def _normalize_variant(variant) -> dict:
         fc2_path=str(fc2),
         gamma_npz=str(gamma),
         factor=_factor_for(spec),
+        injected_modes=(
+            str(spec["injected_modes"] or spec.get("injected_modes_npz"))
+            if spec.get("injected_modes") or spec.get("injected_modes_npz")
+            else None
+        ),
     )
 
 
@@ -169,20 +176,115 @@ def _load_mesh_gamma(gamma_npz: str):
     return q, g
 
 
+def _row_permutation(
+    source: np.ndarray, target: np.ndarray, *, label: str, require_all: bool = True
+) -> np.ndarray:
+    """Return source-row indices that put rows into target order.
+
+    BZ grids may carry equivalent boundary points more than once after folding;
+    pair repeated rows stably by occurrence order rather than treating them as
+    an ambiguity.
+    """
+    source = np.asarray(source)
+    target = np.asarray(target)
+    if source.ndim != 2 or target.ndim != 2 or source.shape[1:] != target.shape[1:]:
+        raise ValueError(f"{label}: incompatible row shapes {source.shape} and {target.shape}")
+    if require_all and len(source) != len(target):
+        raise ValueError(f"{label}: source/target row counts differ")
+    if len(target) > len(source):
+        raise ValueError(f"{label}: target has more rows than source")
+    lookup: dict[tuple[int, ...], list[int]] = {}
+    for index, row in enumerate(source):
+        key = tuple(np.asarray(row, dtype=np.int64))
+        lookup.setdefault(key, []).append(index)
+    permutation = []
+    for row in target:
+        key = tuple(np.asarray(row, dtype=np.int64))
+        candidates = lookup.get(key)
+        if not candidates:
+            raise ValueError(f"{label}: target row {key} is absent from source")
+        permutation.append(candidates.pop(0))
+    if require_all and any(lookup.values()):
+        raise ValueError(f"{label}: source has unmatched rows")
+    return np.asarray(permutation, dtype=np.intp)
+
+
+def _periodic_q_keys(qpoints: np.ndarray, *, scale: int = 10**8) -> np.ndarray:
+    """Canonical integer keys for fractional q points, modulo reciprocal lattice vectors."""
+    wrapped = np.mod(np.asarray(qpoints, dtype=float), 1.0)
+    wrapped[np.isclose(wrapped, 1.0, atol=0.5 / scale)] = 0.0
+    return np.rint(wrapped * scale).astype(np.int64) % scale
+
+
+def _injected_mesh_frequencies(
+    phono3py_yaml: str, injected_modes: str, q_mesh: np.ndarray, mesh
+) -> np.ndarray:
+    """Load matdyn-injected frequencies and reorder them onto gamma's mesh order.
+
+    ``matdyn_modes.py`` writes the Phono3py BZ-grid addresses alongside its QE
+    frequencies.  Validate those addresses against the requested YAML/mesh first,
+    then use the corresponding wrapped q points to align with the gamma artifact.
+    """
+    import phono3py
+
+    with np.load(injected_modes) as z:
+        for key in ("frequencies", "grid_address", "mesh"):
+            if key not in z:
+                raise KeyError(f"{injected_modes}: required key {key!r} is absent")
+        frequencies = np.asarray(z["frequencies"], dtype=np.float64)
+        injected_address = np.asarray(z["grid_address"], dtype=np.int64)
+        injected_mesh = np.asarray(z["mesh"], dtype=np.int64)
+    expected_mesh = np.asarray(mesh, dtype=np.int64)
+    if not np.array_equal(injected_mesh, expected_mesh):
+        raise ValueError(
+            f"{injected_modes}: mesh {injected_mesh.tolist()} does not match "
+            f"requested mesh {expected_mesh.tolist()}"
+        )
+    if frequencies.ndim != 2 or injected_address.shape != (frequencies.shape[0], 3):
+        raise ValueError(
+            f"{injected_modes}: frequencies {frequencies.shape} and grid_address "
+            f"{injected_address.shape} are incompatible"
+        )
+
+    ph3 = phono3py.load(phono3py_yaml, log_level=0)
+    ph3.mesh_numbers = expected_mesh.tolist()
+    expected_address = np.asarray(ph3.grid.addresses, dtype=np.int64)
+    address_order = _row_permutation(
+        injected_address, expected_address, label=f"{injected_modes}: grid_address"
+    )
+    frequencies_on_grid = frequencies[address_order]
+
+    grid_q = np.dot(expected_address, ph3.grid.QDinv)
+    q_order = _row_permutation(
+        _periodic_q_keys(grid_q),
+        _periodic_q_keys(q_mesh),
+        label=f"{injected_modes}: q mesh",
+        require_all=False,
+    )
+    return frequencies_on_grid[q_order]
+
+
 def _prepare_variant(variant, mesh, npoints: int) -> VariantDispersion:
     """Load one variant and build its plot-ready :class:`VariantDispersion`.
 
     Reuses ``compute_band_structure`` (band path), ``mesh_frequencies`` (mesh omega
-    from the SAME fc2) and ``gamma_on_path`` (interpolate gamma). Rescales frequencies
-    to the variant's THz factor (C6) BEFORE interpolating so path/mesh omega stay
-    consistent.
+    from the SAME fc2) and ``gamma_on_path`` (interpolate gamma).  A variant with
+    ``injected_modes`` instead uses its matdyn/QE mesh frequencies, already in THz,
+    for gamma's branch interpolation; the plotted path skeleton remains the raw-fc2
+    diagonalization until a matching matdyn path artifact is supplied.
     """
     spec = _normalize_variant(variant)
     q_path, freqs_p, x, hs_x, reclat = compute_band_structure(
         spec["phono3py_yaml"], spec["fc2_path"], npoints=npoints
     )
     q_mesh, gamma_mesh = _load_mesh_gamma(spec["gamma_npz"])
-    freq_mesh = mesh_frequencies(spec["phono3py_yaml"], spec["fc2_path"], q_mesh)
+    injected = spec["injected_modes"]
+    if injected is None:
+        freq_mesh = mesh_frequencies(spec["phono3py_yaml"], spec["fc2_path"], q_mesh)
+    else:
+        freq_mesh = _injected_mesh_frequencies(
+            spec["phono3py_yaml"], injected, q_mesh, mesh
+        )
 
     if freq_mesh.shape != gamma_mesh.shape:
         raise ValueError(
@@ -193,7 +295,8 @@ def _prepare_variant(variant, mesh, npoints: int) -> VariantDispersion:
     scale = spec["factor"] / _VASP_TO_THZ
     if not np.isclose(scale, 1.0):
         freqs_p = freqs_p * scale
-        freq_mesh = freq_mesh * scale
+        if injected is None:
+            freq_mesh = freq_mesh * scale
 
     gamma_path, _ = gamma_on_path(
         q_path, freqs_p, reclat, q_mesh, freq_mesh, gamma_mesh, mesh
@@ -464,21 +567,27 @@ def compare(
 # CLI.
 # ---------------------------------------------------------------------------
 def _parse_variant_spec(spec: str, default_units: str) -> dict:
-    """Parse ``name=yaml,fc2,gamma[,units]`` into a variant dict."""
+    """Parse ``name=yaml,fc2,gamma[,units[,injected_modes]]`` into a variant dict."""
     name, sep, rest = spec.partition("=")
     if not sep or not name.strip():
         raise argparse.ArgumentTypeError(
-            f"variant spec {spec!r} must be NAME=YAML,FC2,GAMMA[,UNITS]"
+            f"variant spec {spec!r} must be NAME=YAML,FC2,GAMMA[,UNITS[,INJECTED_MODES]]"
         )
     parts = [p.strip() for p in rest.split(",")]
     if len(parts) < 3 or not all(parts[:3]):
         raise argparse.ArgumentTypeError(
-            f"variant spec {spec!r} must be NAME=YAML,FC2,GAMMA[,UNITS]"
+            f"variant spec {spec!r} must be NAME=YAML,FC2,GAMMA[,UNITS[,INJECTED_MODES]]"
         )
     out = dict(
         label=name.strip(), phono3py_yaml=parts[0], fc2_path=parts[1],
         gamma_npz=parts[2], fc2_units=parts[3] if len(parts) > 3 and parts[3] else default_units,
     )
+    if len(parts) > 4 and parts[4]:
+        out["injected_modes"] = parts[4]
+    if len(parts) > 5:
+        raise argparse.ArgumentTypeError(
+            f"variant spec {spec!r} has too many fields; expected NAME=YAML,FC2,GAMMA[,UNITS[,INJECTED_MODES]]"
+        )
     return out
 
 
@@ -489,7 +598,7 @@ def main(argv=None):
     )
     ap.add_argument(
         "--variants", nargs="+", action="append", required=True,
-        metavar="NAME=YAML,FC2,GAMMA[,UNITS]",
+        metavar="NAME=YAML,FC2,GAMMA[,UNITS[,INJECTED_MODES]]",
         help="repeatable (or space-separated) variant specs; UNITS in {ev,ry}.",
     )
     ap.add_argument("--mesh", nargs=3, type=int, required=True,

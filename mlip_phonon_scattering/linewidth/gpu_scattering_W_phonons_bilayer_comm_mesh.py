@@ -244,7 +244,9 @@ def set_phono3py_forces_with_mesh_fc_cache(
     mesh_has = os.path.exists(fc3_mesh) and os.path.exists(fc2_mesh)
     legacy_has = os.path.exists(fc3_legacy) and os.path.exists(fc2_legacy)
 
-    if not mesh_has and legacy_has:
+    # A requested DFPT FC2 is authoritative.  In particular, do not let an
+    # unrelated CWD-relative legacy cache silently replace it.
+    if dfpt_fc2 is None and not mesh_has and legacy_has:
         if rank == 0:
             print(f"Using legacy FC cache from `{legacy_cache_dir}/`.", flush=True)
             if populate_mesh_cache:

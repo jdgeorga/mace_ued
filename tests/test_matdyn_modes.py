@@ -137,6 +137,35 @@ def test_load_matdyn_path_reference():
     assert np.all(np.abs(path) <= 1.0)
 
 
+def test_run_matdyn_relative_workdir_uses_local_input_name(tmp_path, monkeypatch):
+    """A relative workdir must not be prefixed twice after subprocess cwd=... ."""
+    monkeypatch.chdir(tmp_path)
+    ifc = tmp_path / "force_constants.xml"
+    ifc.write_text("fixture")
+    calls = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = "matdyn fixture output"
+
+    def fake_run(args, **kwargs):
+        calls["args"] = args
+        calls["cwd"] = kwargs["cwd"]
+        return _Completed()
+
+    monkeypatch.setattr(matdyn_modes.subprocess, "run", fake_run)
+    modes_path = run_matdyn(
+        "force_constants.xml", np.array([[0.0, 0.0, 0.0]]), True, "relative-workdir"
+    )
+
+    workdir = (tmp_path / "relative-workdir").resolve()
+    assert calls["cwd"] == workdir
+    assert calls["args"] == ["matdyn.x", "-in", "matdyn.in"]
+    assert "flfrc = '" + str(ifc.resolve()) + "'" in (workdir / "matdyn.in").read_text()
+    assert (workdir / "matdyn.out").read_text() == "matdyn fixture output"
+    assert modes_path == str(workdir / "matdyn.modes")
+
+
 @pytest.mark.skip(reason="deferred to compute phase - requires matdyn.x binary, not available on this node")
 def test_matdyn_run_phband_acceptance_gate(tmp_path):
     """Deferred gate: run, parse, then require max |Δ| < .5 and RMS < .1 cm^-1."""

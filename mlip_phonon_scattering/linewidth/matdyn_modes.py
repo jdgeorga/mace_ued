@@ -147,11 +147,13 @@ def write_matdyn_input(
 
 def run_matdyn(ifc_xml: str, qlist: np.ndarray, loto_2d: bool, workdir) -> str:
     """Run serial ``matdyn.x`` and return the produced eigenvector-file path."""
-    directory = Path(workdir)
-    input_path = write_matdyn_input(ifc_xml, qlist, loto_2d, directory)
+    directory = Path(workdir).resolve()
+    directory.mkdir(parents=True, exist_ok=True)
+    ifc_path = Path(ifc_xml).resolve()
+    input_path = write_matdyn_input(str(ifc_path), qlist, loto_2d, directory)
     output_path = directory / "matdyn.out"
     completed = subprocess.run(
-        ["matdyn.x", "-in", str(input_path)],
+        ["matdyn.x", "-in", input_path.name],
         cwd=directory,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

@@ -241,12 +241,18 @@ def read_dfpt(
     dim = _numbers(ifc.find("MESH_NQ1_NQ2_NQ3"), shape=(3,)).astype("int64")
     ndim = int(np.prod(dim))
     alpha_ewald = float(_numbers(ifc.find("alpha_ewald"), shape=(1,))[0])
-    dielectric = _numbers(dielectric_properties.find("EPSILON"), shape=(3, 3))
+    # Unlike the IFC blocks below, NAC tensors are consumed in QE's native
+    # Cartesian orientation.  XML stores them column-major, while _numbers
+    # reshapes row-major, so restore the physical matrix orientation here.
+    dielectric = _numbers(dielectric_properties.find("EPSILON"), shape=(3, 3)).T
     zstar = dielectric_properties.find("ZSTAR")
     if zstar is None:
         raise ValueError("q2r XML is missing ZSTAR Born effective charges.")
     born = np.array(
-        [_numbers(zstar.find(f"Z_AT_.{i}"), shape=(3, 3)) for i in range(1, natom + 1)]
+        [
+            _numbers(zstar.find(f"Z_AT_.{i}"), shape=(3, 3)).T
+            for i in range(1, natom + 1)
+        ]
     )
     volume = float(_numbers(geometry.find("UNIT_CELL_VOLUME_AU"), shape=(1,))[0])
 
@@ -280,6 +286,19 @@ def read_dfpt(
     q2r_spos = q2r._get_q2r_positions(cell)
     scell = get_supercell(cell, np.diag(dim))
     pcell = get_primitive(scell, np.diag(1.0 / dim))
+    # This is the primitive ordering later handed to Phono3py through the
+    # returned structure.  Guard the QE/matdyn order before FC2, masses, and
+    # the eigenvector gauge can be silently mis-indexed.  It is intentionally
+    # a self-consistency check only: read_dfpt has no externally constructed
+    # Phono3py primitive cell to compare against at this call site.
+    primitive_delta = pcell.scaled_positions - cell.scaled_positions
+    primitive_delta -= np.rint(primitive_delta)
+    primitive_distances = np.linalg.norm(primitive_delta @ pcell.cell, axis=1)
+    if list(pcell.symbols) != list(cell.symbols) or np.any(primitive_distances >= symprec):
+        raise RuntimeError(
+            "QE/matdyn atom order does not match the primitive-cell order used for "
+            "FC2, masses, and eigenvector gauge; check structure symmetry/order."
+        )
     site_map = q2r._get_site_mapping(scell.scaled_positions, q2r_spos, scell.cell)
 
     q2r_fc = np.zeros((natom, natom * ndim, 3, 3), dtype="double", order="C")
