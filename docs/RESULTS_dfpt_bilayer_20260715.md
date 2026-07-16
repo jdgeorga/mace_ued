@@ -71,8 +71,27 @@ dfpt_loto_nores K 0.0313/2.54 · dfpt_noloto_res K 0.598/0.13 · mlip_at_dfpt_re
 3. **Residual-force subtraction: negligible** — dfpt_loto res-on vs res-off agree to 4 sig figs
    (K 0.031290 vs 0.031283); the constant F(0) cancels in the FC3 finite differences. So for this
    un-re-relaxed DFPT geometry, subtracting residual forces does not change M/K linewidths.
-4. **2D-LO-TO essential** — noloto inflates γ ~15–19× at M/K (K 0.598 vs 0.031) via near-Γ
-   destabilization (227 floored modes); dropping loto_2d is unphysical for this polar bilayer.
+4. **2D-LO-TO essential (magnitude is a regularization artifact)** — noloto γ is ~15–19× the loto
+   value at M/K, BUT this is largely because dropping loto_2d destabilizes the near-Γ manifold
+   (227 floored modes vs 57), and those floored soft modes act as *decay partners* for the M/K
+   optical modes. So the number demonstrates **2D-LOTO is required for a stable harmonic**, but the
+   "19×" is not a clean measure of the LOTO term's direct effect on M/K linewidths — bound/reframe it.
+
+## Pre-merge review (Sol + Opus, 2026-07-16) + magnitude caveats
+No P0. Verified the V1/V2/V3 isolation is genuinely clean (same fc3/geometry/masses; differ only in
+the phonons) → the **qualitative headline is sound**: DFPT eigenvectors dominate M/K optical γ, and
+residual-force subtraction is genuinely negligible. Review fixes applied (commit 5224c38): NAC Born
+`.T` orientation, compare uses injected modes for DFPT band-lines, `--fc2-source dfpt` fallback
+guard, matdyn abs-paths, `MATDYN_BIN` override, atom-order assert. 40 tests pass.
+
+**Two magnitude caveats to resolve before publishing the EXACT 2.9× (direction is robust):**
+- **Gauge sign −1 not validated in-situ** — the eigenvector-overlap gate is non-functional for this
+  NAC-sensitive heterobilayer (mean overlap ~0.05–0.09). Sign −1 rests on the documented
+  phonopy↔QE convention + `select_gauge` independently landing on −1. Recommend an overlap check
+  restricted to **high-optical modes** (not 2D-LOTO-sensitive) for −1 vs +1.
+- **0.02 THz floor leaks into M/K γ via decay channels** — V2-loto's 57 floored near-Γ modes are
+  decay partners for M/K optical modes; their contribution to the 2.9× is unquantified. Recommend a
+  **refloor/exclude re-run** of V2-loto to bound M/K stability.
 
 **Full 7/7 factorial complete** (`figures_full7/` = 7-panel γ + τ + CSV). The two final res-off
 variants confirm the residual-negligible result end-to-end: V3-nores γ_max 0.0136 = V3-res 0.0136;
