@@ -1,9 +1,11 @@
 """Read the custom XML force-constant dump produced by QE ``q2r.x``.
 
 The dump handled here is XML, unlike the plain-text q2r output consumed by
-``phonopy.interface.qe.PH_Q2R``.  Its force-constant ordering is nevertheless
-the same, so this module deliberately reuses PH_Q2R's private geometry helpers
-instead of maintaining a second implementation of that subtle permutation.
+``phonopy.interface.qe.PH_Q2R``. Its IFC payload is written in Fortran
+column-major order; :func:`_numbers` reshapes that sequence in NumPy C order,
+which already transposes each 3-by-3 IFC block into PH_Q2R's convention. This
+module deliberately reuses PH_Q2R's private geometry helpers instead of
+maintaining a second implementation of the remaining subtle permutation.
 """
 
 from __future__ import annotations
@@ -290,8 +292,11 @@ def read_dfpt(
             continue
         s, s1, m1, m2, m3 = (int(value) for value in match.groups())
         i_dim = trans.index((m1 - 1, m2 - 1, m3 - 1))
+        # QE writes the Fortran aux(:,:) matrix column-major. _numbers uses a
+        # NumPy C-order reshape, so block is aux.T already—the orientation
+        # required by PH_Q2R's compact force-constant convention.
         block = _numbers(entry.find("IFC"), shape=(3, 3))
-        q2r_fc[s1 - 1, (s - 1) * ndim + i_dim] = block.T
+        q2r_fc[s1 - 1, (s - 1) * ndim + i_dim] = block
         found += 1
     expected = natom * natom * ndim
     if found != expected:
