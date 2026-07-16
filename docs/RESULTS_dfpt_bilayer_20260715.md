@@ -74,8 +74,10 @@ dfpt_loto_nores K 0.0313/2.54 · dfpt_noloto_res K 0.598/0.13 · mlip_at_dfpt_re
 4. **2D-LO-TO essential** — noloto inflates γ ~15–19× at M/K (K 0.598 vs 0.031) via near-Γ
    destabilization (227 floored modes); dropping loto_2d is unphysical for this polar bilayer.
 
-Not run (allocation expired mid-scatter, secondary): V2-noloto-nores, V3-nores (each combines a
-2nd-order effect already isolated above). Resume templates: `driver_extras.sh`.
+**Full 7/7 factorial complete** (`figures_full7/` = 7-panel γ + τ + CSV). The two final res-off
+variants confirm the residual-negligible result end-to-end: V3-nores γ_max 0.0136 = V3-res 0.0136;
+V2-noloto-nores γ_max 34.46 = V2-noloto-res 34.46 (residual-force subtraction changes nothing at
+any variant). Reproducible via committed `examples/mose2_wse2_bilayer_dfpt/run_dfpt_linewidth.sh`.
 
 ## Status
 Core (V1|V2|V3) + 5/7 factorial complete, both figure sets (`figures_core/`, `figures_full/`) + CSVs.
