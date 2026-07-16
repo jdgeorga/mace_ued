@@ -224,6 +224,7 @@ def set_phono3py_forces_with_mesh_fc_cache(
     legacy_cache_dir: str = "phonon_cache",
     populate_mesh_cache: bool = True,
     comm: Optional[MPI.Comm] = None,
+    dfpt_fc2: Optional[str] = None,
 ) -> None:
     """Attach forces and build/load cached fc2/fc3, with legacy fallback."""
     if comm is None:
@@ -262,7 +263,10 @@ def set_phono3py_forces_with_mesh_fc_cache(
             os.makedirs(cache_dir_mesh, exist_ok=True)
             print(f"Computing force constants in `{cache_dir_mesh}/` on rank 0...", flush=True)
             ph3.produce_fc3(symmetrize_fc3r=True)
-            ph3.produce_fc2(symmetrize_fc2=True)
+            if dfpt_fc2 is None:
+                ph3.produce_fc2(symmetrize_fc2=True)
+            else:
+                ph3.fc2 = np.load(dfpt_fc2, allow_pickle=True)
             np.save(fc3_mesh, ph3.fc3, allow_pickle=True)
             np.save(fc2_mesh, ph3.fc2, allow_pickle=True)
         comm.Barrier()
@@ -546,6 +550,7 @@ def run_scattering(
     ir_index_stop: Optional[int] = None,
     cache_dir: Optional[str] = None,
     fc_cache_dir: Optional[str] = None,
+    injected_modes: Optional[str] = None,
 ) -> None:
     comm = MPI.COMM_WORLD
     rank = comm.Get_rank()
@@ -597,14 +602,41 @@ def run_scattering(
     )
 
     ph3.mesh_numbers = mesh_numbers
-    ph3.init_phph_interaction(symmetrize_fc3q=True)
+    ph3.init_phph_interaction(nac_q_direction=None, symmetrize_fc3q=True)
 
-    if rank == 0:
-        print(f"Running harmonic phonon solver on mesh {mesh_numbers}", flush=True)
-    t0 = time.time()
-    ph3.run_phonon_solver()
-    if rank == 0:
-        print(f"Harmonic mesh done in {time.time() - t0:.1f}s", flush=True)
+    if injected_modes is None:
+        if rank == 0:
+            print(f"Running harmonic phonon solver on mesh {mesh_numbers}", flush=True)
+        t0 = time.time()
+        ph3.run_phonon_solver()
+        if rank == 0:
+            print(f"Harmonic mesh done in {time.time() - t0:.1f}s", flush=True)
+    else:
+        z = np.load(injected_modes)
+        frequencies = z["frequencies"].astype(np.float64)
+        eigvecs_raw = z["eigenvectors"]
+        nb = eigvecs_raw.shape[1]
+        nat = eigvecs_raw.shape[2]
+        eigvecs = eigvecs_raw.reshape(eigvecs_raw.shape[0], nb, nat * 3).transpose(0, 2, 1)
+        eigvecs = eigvecs.astype(np.complex128)
+        grid_address = z["grid_address"].astype(np.int64)
+        if grid_address.shape != ph3.grid.addresses.shape or not np.array_equal(
+            grid_address, ph3.grid.addresses
+        ):
+            raise RuntimeError(
+                "Injected DFPT grid_address does not exactly match ph3.grid.addresses; "
+                "the modes were computed for a different mesh or grid."
+            )
+        ph3.set_phonon_data(frequencies, eigvecs, grid_address)
+        phonon_done = ph3.phph_interaction.get_phonons()[2]
+        if not np.all(phonon_done == 1):
+            raise RuntimeError("Injected DFPT phonon data did not mark every mesh point phonon_done.")
+        if rank == 0:
+            print(
+                f"Injected DFPT phonon data on mesh {mesh_numbers} "
+                f"(phonon_done: {np.count_nonzero(phonon_done)}/{phonon_done.size})",
+                flush=True,
+            )
 
     ir_grid_points_grg, _, ir_grid_map = get_ir_grid_points(ph3.grid)
     ir_grid_points_bzg = np.array(ph3.grid.grg2bzg[ir_grid_points_grg], dtype="int64")
@@ -723,6 +755,14 @@ def _parse_args() -> argparse.Namespace:
         "--fc3-forces",
         default="MoSe2-WSe2_bilayer_relaxed_forces_3rd.npy",
     )
+    parser.add_argument(
+        "--injected-modes",
+        default=None,
+        help=(
+            "Path to a DFPT modes .npz (keys: frequencies, eigenvectors, grid_address) "
+            "to inject via Phono3py.set_phonon_data instead of solving the MLIP harmonic phonons."
+        ),
+    )
 
     parser.add_argument("--mesh", nargs=3, type=int, default=[12, 12, 1], metavar=("MX", "MY", "MZ"))
     parser.add_argument("--temperature", type=float, default=300.0)
@@ -839,6 +879,7 @@ def main() -> None:
         ir_index_stop=args.ir_index_stop,
         cache_dir=args.cache_dir,
         fc_cache_dir=args.fc_cache_dir,
+        injected_modes=args.injected_modes,
     )
 
 
