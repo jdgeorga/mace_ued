@@ -61,7 +61,23 @@ Consequence: V2 γ_max (0.33 THz) is dominated by near-Γ hotspots from the floo
   `dfpt_modes_{loto,noloto}_floored.npz`; forces `f3_res/f2_res` + `disp_forces_*_nores`.
 - Prep/gate logs: `prep.log`, `gate*/`, `clean/`. Driver: `driver_prep.sh`, `driver_extras.sh`, `bin/matdyn.x` (OMP=1 shim).
 
+## Full factorial (5 of 7 variants) — `figures_full/`
+M/K top-optical γ(THz)/τ(ps): mlip_strict K 0.0076/10.4 · dfpt_loto_res K 0.0313/2.54 ·
+dfpt_loto_nores K 0.0313/2.54 · dfpt_noloto_res K 0.598/0.13 · mlip_at_dfpt_res K 0.0107/7.5.
+
+**Ablation conclusions (all axes):**
+1. **FC2-source (DFPT eigvecs vs MLIP): ~2.9× at M/K** — the dominant, physical effect.
+2. **Geometry (DFPT vs MLIP-relaxed): small** (γ ratio 0.7–1.1×).
+3. **Residual-force subtraction: negligible** — dfpt_loto res-on vs res-off agree to 4 sig figs
+   (K 0.031290 vs 0.031283); the constant F(0) cancels in the FC3 finite differences. So for this
+   un-re-relaxed DFPT geometry, subtracting residual forces does not change M/K linewidths.
+4. **2D-LO-TO essential** — noloto inflates γ ~15–19× at M/K (K 0.598 vs 0.031) via near-Γ
+   destabilization (227 floored modes); dropping loto_2d is unphysical for this polar bilayer.
+
+Not run (allocation expired mid-scatter, secondary): V2-noloto-nores, V3-nores (each combines a
+2nd-order effect already isolated above). Resume templates: `driver_extras.sh`.
+
 ## Status
-Core comparison (V1|V2|V3, residual-on) complete + figures. Full factorial (residual-off + noloto)
-running as extras. Code: `mlip_phonon_scattering` branch `split_mlip_phonon_lifetime`
-(commits `e66c149`→`40eaa3f`). Phase-2 (fork-native `DynamicalMatrixQELoto2D`) not yet started.
+Core (V1|V2|V3) + 5/7 factorial complete, both figure sets (`figures_core/`, `figures_full/`) + CSVs.
+Code: `mlip_phonon_scattering` branch `split_mlip_phonon_lifetime` (commits `e66c149`→`e4882ea`).
+Phase-2 (fork-native `DynamicalMatrixQELoto2D`) not started — injection route delivered the science.
