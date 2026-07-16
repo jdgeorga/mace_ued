@@ -1,8 +1,25 @@
 import numpy as np
 import pytest
-from mlip_phonon_scattering.linewidth.dfpt_read import read_dfpt
+from mlip_phonon_scattering.linewidth.dfpt_read import (
+    check_d3_and_acoustic,
+    read_dfpt,
+    resolve_dfpt_log_path,
+)
 
 DFPT = "/pscratch/sd/j/jdgeorga/ued/tdbe_paper_prod_speed_density_fine/2-mose2_wse2_6atoms/1-mf/ph_perq_d3fix"
+
+
+def test_resolve_dfpt_log_path_missing(tmp_path):
+    assert resolve_dfpt_log_path(tmp_path) is None
+
+
+@pytest.mark.slow
+def test_resolve_dfpt_log_path_production_out_log_and_d3_gate():
+    path = resolve_dfpt_log_path(DFPT)
+    assert path is not None
+    assert str(path).endswith("q1/out.log")
+    result = check_d3_and_acoustic(path, np.array([0.0, 0.0, 0.0, 5.0]))
+    assert result["d3_detected"] is True
 
 
 @pytest.mark.slow

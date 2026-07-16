@@ -196,6 +196,25 @@ def check_d3_and_acoustic(ph_out_path: str | Path, gamma_freqs: np.ndarray) -> d
     return result
 
 
+def resolve_dfpt_log_path(dfpt_dir: str | Path) -> Path | None:
+    """Return the first available q1 ph.x log using production-compatible names.
+
+    Older runs conventionally wrote ``ph.out`` while the production DFPT data
+    writes ``out.log``.  Preserve that precedence, then accept other matching
+    output/log names for compatible datasets.
+    """
+
+    q1_dir = Path(dfpt_dir) / "q1"
+    for candidate in (q1_dir / "ph.out", q1_dir / "out.log"):
+        if candidate.is_file():
+            return candidate
+    for pattern in ("*.out", "*.log"):
+        matches = sorted(q1_dir.glob(pattern))
+        if matches:
+            return matches[0]
+    return None
+
+
 def read_dfpt(
     dfpt_dir: str | Path,
     layer_symbols: list[list[str]] | None = None,
@@ -413,13 +432,13 @@ def main(argv=None):
     print(f"wrote {fc2_path}  shape={data.fc2.shape}")
     print(f"wrote {nac_path}  keys={sorted(data.nac)}")
 
-    ph_out_path = Path(args.dfpt_dir) / "q1" / "ph.out"
-    if ph_out_path.is_file():
+    ph_out_path = resolve_dfpt_log_path(args.dfpt_dir)
+    if ph_out_path is not None:
         dm = dynamical_matrix_from_dfpt(data)
         freq_gamma, _ = frequencies_and_eigenvectors_at_q(dm, [0.0, 0.0, 0.0])
         print(f"gate results: {check_d3_and_acoustic(ph_out_path, freq_gamma)}")
     else:
-        print(f"gate check skipped: {ph_out_path} not found")
+        print(f"gate check skipped: {Path(args.dfpt_dir) / 'q1' / 'ph.out'} not found")
 
 
 if __name__ == "__main__":

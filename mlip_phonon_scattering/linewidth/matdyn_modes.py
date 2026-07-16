@@ -12,8 +12,16 @@ from pathlib import Path
 import re
 import subprocess
 from typing import Sequence
+import warnings
 
 import numpy as np
+
+from mlip_phonon_scattering.linewidth.gauge import (
+    GaugeTransform,
+    apply_bloch_gauge,
+    apply_selected_gauge,
+    select_gauge,
+)
 
 
 _FLOAT = r"[-+0-9.eE]+"
@@ -26,6 +34,71 @@ _VECTOR_RE = re.compile(
     rf"\(\s*({_FLOAT})\s+({_FLOAT})\s+({_FLOAT})\s+({_FLOAT})\s+"
     rf"({_FLOAT})\s+({_FLOAT})\s*\)"
 )
+
+
+def apply_frequency_floor(
+    frequencies: np.ndarray, floor_thz: float
+) -> tuple[np.ndarray, int]:
+    """Return a copy with frequencies below a positive floor raised to it."""
+
+    floored = np.asarray(frequencies).copy()
+    if floor_thz <= 0:
+        return floored, 0
+    mask = floored < floor_thz
+    n_floored = int(np.count_nonzero(mask))
+    floored[mask] = floor_thz
+    return floored, n_floored
+
+
+def apply_gauge_with_sign_guard(
+    e_ph: np.ndarray,
+    e_qe: np.ndarray,
+    q_cryst: np.ndarray,
+    tau_frac: np.ndarray,
+    gauge_sign: int | str,
+    freqs_ph: np.ndarray | None = None,
+) -> tuple[np.ndarray, GaugeTransform, float, bool]:
+    """Apply a fixed Bloch sign, retaining auto selection as a diagnostic.
+
+    ``gauge_sign='auto'`` reproduces the legacy complete-transform selection.
+    A fixed sign always uses the plain QE-to-phonopy Bloch transform; the
+    selection result is deliberately only a warning-producing cross-check.
+    """
+
+    selected, residual, qflip_perm = select_gauge(
+        e_ph, e_qe, q_cryst, tau_frac, freqs=freqs_ph
+    )
+    if gauge_sign == "auto":
+        return (
+            apply_selected_gauge(e_qe, q_cryst, tau_frac, selected, qflip_perm),
+            selected,
+            residual,
+            False,
+        )
+
+    try:
+        fixed_sign = int(gauge_sign)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("gauge_sign must be -1, 1, or 'auto'") from exc
+    if fixed_sign not in (-1, 1):
+        raise ValueError("gauge_sign must be -1, 1, or 'auto'")
+
+    transform = GaugeTransform(sign=fixed_sign, conjugate=False, qflip=False)
+    warned = selected.sign != fixed_sign
+    if warned:
+        message = (
+            "fixed gauge sign "
+            f"{fixed_sign} is being applied, but select_gauge chose sign "
+            f"{selected.sign} (residual={residual:.4g}); fixed sign wins."
+        )
+        warnings.warn(message, stacklevel=2)
+        print(f"WARNING: {message}")
+    return (
+        apply_bloch_gauge(e_qe, q_cryst, tau_frac, sign=fixed_sign),
+        transform,
+        residual,
+        warned,
+    )
 
 
 def matdyn_qpoints_for_mesh(
@@ -233,10 +306,6 @@ def main(argv=None):
         dynamical_matrix_from_dfpt,
         frequencies_and_eigenvectors_at_q,
     )
-    from mlip_phonon_scattering.linewidth.gauge import (
-        apply_selected_gauge,
-        select_gauge,
-    )
 
     parser = argparse.ArgumentParser(
         description="Run matdyn on phono3py's BZ grid; gauge-correct and write modes."
@@ -258,6 +327,18 @@ def main(argv=None):
     )
     parser.add_argument("--workdir", default=None)
     parser.add_argument("--out", required=True)
+    parser.add_argument(
+        "--floor-freq-thz",
+        type=float,
+        default=0.0,
+        help="Raise saved frequencies below this positive THz floor (default: off).",
+    )
+    parser.add_argument(
+        "--gauge-sign",
+        choices=["-1", "1", "auto"],
+        default="-1",
+        help="Fixed QE-to-phonopy Bloch sign (default: -1), or legacy auto selection.",
+    )
     args = parser.parse_args(argv)
 
     loto_2d = args.loto_2d == "on"
@@ -308,13 +389,20 @@ def main(argv=None):
     # docs/phonopy_eigenvector_gauge.md (phonopy->QE is ``sign=+1``, so
     # QE->phonopy here is ``sign=-1``). Do not over-interpret ``residual`` as
     # a quality gate for this reference; it is diagnostic only.
-    transform, residual, qflip_perm = select_gauge(
-        e_ph, e_qe, q_cryst, structure.get_scaled_positions(), freqs=freq_ph
+    gauge_sign: int | str = "auto" if args.gauge_sign == "auto" else int(args.gauge_sign)
+    gauged, transform, residual, _warned = apply_gauge_with_sign_guard(
+        e_ph,
+        e_qe,
+        q_cryst,
+        structure.get_scaled_positions(),
+        gauge_sign,
+        freqs_ph=freq_ph,
     )
     print(f"gauge transform: {transform}  residual={residual:.4g}")
-    gauged = apply_selected_gauge(
-        e_qe, q_cryst, structure.get_scaled_positions(), transform, qflip_perm
-    )
+
+    if args.floor_freq_thz > 0:
+        freqs, n_floored = apply_frequency_floor(freqs, args.floor_freq_thz)
+        print(f"floored {n_floored} modes below {args.floor_freq_thz} THz")
 
     # Store primary layout; a later Phono3py consumer converts it to (Nq, nat*3, mode).
     np.savez(

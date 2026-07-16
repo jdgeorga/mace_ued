@@ -10,11 +10,18 @@ import phono3py
 import mlip_phonon_scattering.linewidth.matdyn_modes as matdyn_modes
 
 from mlip_phonon_scattering.linewidth.matdyn_modes import (
+    apply_gauge_with_sign_guard,
+    apply_frequency_floor,
     load_matdyn_path,
     load_phband_freq,
     matdyn_qpoints_for_mesh,
     parse_matdyn_modes,
     run_matdyn,
+)
+from mlip_phonon_scattering.linewidth.gauge import (
+    apply_bloch_gauge,
+    apply_selected_gauge,
+    select_gauge,
 )
 
 
@@ -23,6 +30,69 @@ FLFRQ = ROOT / "phband.freq"
 FLVEC = ROOT / "matdyn.modes"
 MATDYN_IN = ROOT / "matdyn.in"
 DFPT = "/pscratch/sd/j/jdgeorga/ued/tdbe_paper_prod_speed_density_fine/2-mose2_wse2_6atoms/1-mf/ph_perq_d3fix"
+
+
+def test_apply_frequency_floor():
+    frequencies = np.array([[-0.3, 0.01, 0.02, 1.5], [0.019, 3.0, 4.0, 5.0]])
+    floored, count = apply_frequency_floor(frequencies, 0.02)
+    assert count == 3
+    assert np.array_equal(floored, [[0.02, 0.02, 0.02, 1.5], [0.02, 3.0, 4.0, 5.0]])
+    assert np.array_equal(frequencies, [[-0.3, 0.01, 0.02, 1.5], [0.019, 3.0, 4.0, 5.0]])
+
+    unchanged, count = apply_frequency_floor(frequencies, 0.0)
+    assert count == 0
+    assert np.array_equal(unchanged, frequencies)
+    assert unchanged is not frequencies
+
+    unchanged_negative, count = apply_frequency_floor(frequencies, -0.1)
+    assert count == 0
+    assert np.array_equal(unchanged_negative, frequencies)
+
+
+def test_apply_gauge_with_sign_guard(recwarn):
+    rng = np.random.default_rng(37)
+    e_qe = rng.standard_normal((2, 2, 2, 3)) + 1j * rng.standard_normal((2, 2, 2, 3))
+    q = np.array([[0.13, 0.07, 0.0], [0.21, 0.04, 0.0]])
+    tau = np.array([[0.0, 0.0, 0.0], [0.31, 0.17, 0.0]])
+    e_ph = apply_bloch_gauge(e_qe, q, tau, sign=1)
+    freqs = np.array([[1.0, 2.0], [1.5, 2.5]])
+
+    selected, _residual, permutation = select_gauge(e_ph, e_qe, q, tau, freqs=freqs)
+    assert selected.sign == 1
+    assert permutation is None
+
+    with pytest.warns(UserWarning, match="fixed gauge sign -1"):
+        forced, transform, _residual, warned = apply_gauge_with_sign_guard(
+            e_ph, e_qe, q, tau, gauge_sign=-1, freqs_ph=freqs
+        )
+    assert warned is True
+    assert transform.sign == -1
+    assert np.allclose(forced, apply_bloch_gauge(e_qe, q, tau, sign=-1))
+
+    recwarn.clear()
+    agreed, transform, _residual, warned = apply_gauge_with_sign_guard(
+        e_ph, e_qe, q, tau, gauge_sign=1, freqs_ph=freqs
+    )
+    assert not recwarn
+    assert warned is False
+    assert transform.sign == 1
+    assert np.allclose(agreed, apply_bloch_gauge(e_qe, q, tau, sign=1))
+
+    expected_transform, expected_residual, expected_perm = select_gauge(
+        e_ph, e_qe, q, tau, freqs=freqs
+    )
+    recwarn.clear()
+    automatic, transform, residual, warned = apply_gauge_with_sign_guard(
+        e_ph, e_qe, q, tau, gauge_sign="auto", freqs_ph=freqs
+    )
+    assert not recwarn
+    assert warned is False
+    assert transform == expected_transform
+    assert residual == expected_residual
+    assert np.allclose(
+        automatic,
+        apply_selected_gauge(e_qe, q, tau, expected_transform, expected_perm),
+    )
 
 
 def test_matdyn_qpoints_for_mesh_uses_bzgrid_formula(tmp_path):
